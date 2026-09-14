@@ -109,6 +109,7 @@ npm install
 # Inicie a aplicação React
 npm run dev
 ```
+A aplicação estará acessível em: http://localhost:5173
 ## Autor
 
 Matheus Henrique Silva Oliveira  
