@@ -28,6 +28,7 @@ interface AuthContextType {
     confirmPasswordReset: (email: string, code: string, newPassword: string) => Promise<string>;
     logout: () => Promise<void>;
     exportMyData: () => Promise<void>;
+    deleteMyAccount: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType>({} as AuthContextType);
@@ -139,6 +140,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         downloadAnchor.remove();
     };
 
+    const deleteMyAccount = async () => {
+        try {
+            await api.delete('auth/me/delete/');
+        } catch (err) {
+            console.error('Erro ao excluir conta:', err);
+        } finally {
+            localStorage.removeItem('@OsteoLearn:token');
+            localStorage.removeItem('@OsteoLearn:refresh');
+            setUser(null);
+            window.location.href = '/';
+        }
+    };
+
     return (
         <AuthContext.Provider value={{
             user,
@@ -150,7 +164,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             requestPasswordReset,
             confirmPasswordReset,
             logout,
-            exportMyData
+            exportMyData,
+            deleteMyAccount,
         }}>
             {children}
         </AuthContext.Provider>

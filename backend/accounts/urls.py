@@ -9,7 +9,8 @@ from .views import (
     PasswordResetConfirmView,
     LogoutView, 
     MeView, 
-    LGPDExportDataView
+    LGPDExportDataView,
+    DeleteAccountView
 )
 
 urlpatterns = [
@@ -23,4 +24,5 @@ urlpatterns = [
     path('me/', MeView.as_view(), name='auth_me'),
     path('logout/', LogoutView.as_view(), name='auth_logout'),
     path('lgpd/export/', LGPDExportDataView.as_view(), name='lgpd_export'),
+    path('me/delete/', DeleteAccountView.as_view(), name='account-delete'),
 ]

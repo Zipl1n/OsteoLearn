@@ -19,7 +19,8 @@ import {
   Sun,
   Maximize2,
   AlertTriangle,
-  HeartPulse
+  HeartPulse,
+  Trash2,
 } from 'lucide-react';
 import { useAuth } from './context/AuthContext';
 import { LoginPage } from './components/auth/LoginPage';
@@ -119,7 +120,7 @@ function AnatomicalBoneViewer({
 }
 
 export default function App() {
-  const { user, logout, exportMyData } = useAuth();
+  const { user, logout, exportMyData, deleteMyAccount } = useAuth();
 
   const [selectedId, setSelectedId] = useState<number>(2);
   const [activeTab, setActiveTab] = useState<'acidentes' | 'clinica' | 'quiz'>('acidentes');
@@ -246,7 +247,18 @@ export default function App() {
               className="w-full mt-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-white/70 hover:text-white text-[10px] transition-all border border-white/10 cursor-pointer"
             >
               <Download className="w-3 h-3" />
-              <span>Exportar Dados (LGPD)</span>
+              <span>Exportar Dados da Conta</span>
+            </button>
+            <button
+              onClick={async () => {
+                if (window.confirm("ATENÇÃO: Tem certeza que deseja excluir sua conta definitivamente? Todos os seus dados e progresso serão apagados.")) {
+                  await deleteMyAccount();
+                }
+              }}
+              className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-300 hover:text-red-200 text-xs font-medium transition-colors border border-red-500/20 cursor-pointer"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Excluir Minha Conta</span>
             </button>
           </div>
         </div>

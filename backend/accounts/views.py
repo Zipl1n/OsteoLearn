@@ -357,3 +357,23 @@ class LGPDExportDataView(APIView):
                 'historico_acessos_e_logs': logs_data
             }
         })
+
+class DeleteAccountView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def delete(self, request):
+        user = request.user
+        user_email = user.email
+        ip = get_client_ip(request)
+        user_agent = request.META.get('HTTP_USER_AGENT', '')
+
+        AuditLog.objects.create(
+            user=None,
+            action='ACCOUNT_DELETED',
+            ip_address=ip,
+            user_agent=user_agent,
+            details={'deleted_email': user_email, 'reason': 'Solicitado pelo titular (Art. 18 LGPD)'}
+        )
+
+        user.delete()
+        return Response({'message': 'Conta e dados pessoais excluídos com sucesso conforme a LGPD.'}, status=status.HTTP_200_OK)
