@@ -12,6 +12,7 @@ import {
   ChevronDown,
   Volume2,
   LogOut,
+  Download,
   ZoomIn,
   ZoomOut,
   RotateCcw,
@@ -20,6 +21,8 @@ import {
   AlertTriangle,
   HeartPulse
 } from 'lucide-react';
+import { useAuth } from './context/AuthContext';
+import { LoginPage } from './components/auth/LoginPage';
 
 // Dados dos Acidentes Anatômicos do Osso Temporal
 interface Acidente {
@@ -116,13 +119,14 @@ function AnatomicalBoneViewer({
 }
 
 export default function App() {
+  const { user, logout, exportMyData } = useAuth();
+
   const [selectedId, setSelectedId] = useState<number>(2);
   const [activeTab, setActiveTab] = useState<'acidentes' | 'clinica' | 'quiz'>('acidentes');
   const [viewMode, setViewMode] = useState<'3d' | 'isolada' | 'raiox'>('3d');
   const [lightIntensity, setLightIntensity] = useState<number>(1.2);
   const [isAxialOpen, setIsAxialOpen] = useState(true);
 
-  // Referência para os controles de câmera
   const controlsRef = useRef<OrbitControlsImpl | null>(null);
 
   const handleZoom = (delta: number) => {
@@ -143,6 +147,10 @@ export default function App() {
     utterance.lang = 'la';
     window.speechSynthesis.speak(utterance);
   };
+
+  if (!user) {
+    return <LoginPage />;
+  }
 
   return (
     <div className="flex h-screen w-screen bg-[#F8F9F6] text-slate-800 font-sans overflow-hidden">
@@ -207,18 +215,40 @@ export default function App() {
           </div>
         </div>
 
-        {/* Card do Estudante */}
-        <div className="relative z-10 flex items-center gap-3 p-3 bg-white/10 backdrop-blur-sm rounded-xl border border-white/10">
-          <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-[#E7DFC6] to-[#C9BE9C] text-[#1B2E19] font-bold text-sm flex items-center justify-center">
-            MH
+        {/* Card do Estudante Autenticado (com LGPD) */}
+        <div className="relative z-10 pt-2 border-t border-white/10">
+          <div className="flex flex-col gap-2 p-3 bg-white/10 backdrop-blur-sm rounded-xl border border-white/10">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-[#E7DFC6] to-[#C9BE9C] text-[#1B2E19] font-bold text-xs flex items-center justify-center uppercase shadow-inner">
+                {user.name && user.name.trim()
+                  ? user.name.trim().split(' ').map((n: string) => n[0]).slice(0, 2).join('').toUpperCase()
+                  : user.email.slice(0, 2).toUpperCase()}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-semibold text-white truncate">
+                  {user.name && user.name.trim() ? user.name : user.email.split('@')[0]}
+                </p>
+                <p className="text-[10px] text-white/60 truncate">{user.email}</p>
+              </div>
+              <button
+                onClick={logout}
+                title="Sair da conta"
+                className="text-white/60 hover:text-white p-1 transition-colors cursor-pointer"
+              >
+                <LogOut className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Botão de Exportar Meus Dados (Art. 18 LGPD) */}
+            <button
+              onClick={exportMyData}
+              title="Baixar todos os meus dados e histórico de acessos (Art. 18 LGPD)"
+              className="w-full mt-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-white/70 hover:text-white text-[10px] transition-all border border-white/10 cursor-pointer"
+            >
+              <Download className="w-3 h-3" />
+              <span>Exportar Dados (LGPD)</span>
+            </button>
           </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-xs font-semibold text-white truncate">Matheus Henrique</p>
-            <p className="text-[10px] text-white/60 truncate">matheusexemplo@gmail.com.br</p>
-          </div>
-          <button title="Sair" className="text-white/60 hover:text-white p-1">
-            <LogOut className="w-4 h-4" />
-          </button>
         </div>
       </aside>
 
@@ -254,7 +284,7 @@ export default function App() {
               onClick={() => setViewMode('3d')}
               className={`px-3 py-1.5 rounded-full transition-all ${viewMode === '3d' ? 'bg-white text-[#2E482C] shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
             >
-              Visão 3D Completa
+              Visão 3D
             </button>
             <button
               onClick={() => setViewMode('isolada')}
