@@ -29,6 +29,9 @@ A proposta é proporcionar um ambiente de **aprendizagem ativa**, reduzindo a de
 | **Quiz "Alfinetada" 3D** | Perguntas práticas com cálculo de tolerância de clique no modelo 3D, feedback na hora e pontuação cumulativa. |
 | **Dashboard do Estudante** | Acompanhamento do progresso, taxa de acertos e mapeamento dos ossos com maior índice de erros para revisão. |
 | **Design Responsivo** | Interface moderna e fluida, adaptada para telas de computadores, notebooks e tablets. |
+| **Autenticação em 2 Etapas (2FA)** | Segurança reforçada com envio de código OTP de 6 dígitos via e-mail real e filtro de senha forte. |
+| **Integração Google OAuth** | Acesso rápido e seguro utilizando a conta Google do estudante. |
+| **Privacidade e LGPD** | Termos de uso, política de privacidade independentes e exportação dos dados do titular (Art. 18). |
 
 ---
 
@@ -43,6 +46,30 @@ A proposta é proporcionar um ambiente de **aprendizagem ativa**, reduzindo a de
 * **Deploy & Hospedagem:** Vercel (Frontend SPA), Render (Backend Django API) e Supabase Cloud (Banco de dados gerenciado).
 
 * **Testes & Qualidade:** PyTest / Django Test Framework (testes unitários e regras de negócio), ESLint e Prettier (padronização de código).
+
+## Segurança, Autenticação e 2FA
+
+* **Autenticação Híbrida:** Login tradicional (e-mail e senha) e autenticação social via **Google OAuth 2.0**.
+* **Autenticação em Dois Fatores (2FA):** Envio de código OTP de 6 dígitos via SMTP para validação de acesso e recuperação de conta.
+* **Criptografia Zero-Knowledge:** Senhas protegidas com PBKDF2 SHA-256 e códigos de 2FA armazenados exclusivamente como hash SHA-256 no banco de dados.
+* **Política de Senha Forte:** Validação em tempo real exigindo no mínimo 8 caracteres, pelo menos 1 letra, 1 número e 1 caractere especial.
+
+---
+
+## Integração com API Externa (Google OAuth 2.0)
+
+A plataforma consome a API do **Google Identity Services (OAuth 2.0)** para login seguro:
+* **Escopos utilizados:** `email` e `profile`.
+* **Fluxo:** O estudante autentica com sua conta Google, a API valida a identidade e o backend emite os tokens JWT de sessão vinculando os dados institucionais do aluno.
+
+---
+
+## Conformidade LGPD e Logs de Auditoria
+
+* **Termos de Uso e Política de Privacidade:** Documentos separados e específicos para o OsteoLearn (regras do Atlas 3D da UMC e tratamento de dados), acessíveis a qualquer momento na plataforma.
+* **Consentimento Registrado:** Aceite formal versionado (v1.0) registrado no banco com IP e data/hora.
+* **Exportação de Dados (Art. 18):** Botão no perfil que permite ao estudante baixar um arquivo JSON com todos os seus dados e histórico.
+* **Logs de Auditoria:** Tabela `AuditLog` que registra IP, navegador, data/hora e eventos de segurança (cadastros, logins, falhas, 2FA e alterações de senha).
 
 ---
 
