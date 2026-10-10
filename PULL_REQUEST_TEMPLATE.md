@@ -1,10 +1,10 @@
 ## 1. Identificação
-- **Aluno(s):** Matheus Henrique da Silva Oliveira - [Inserir RA]
+- **Aluno(s):** Matheus Henrique da Silva Oliveira - 11231103990
 - **Projeto (PFC):** OsteoLearn (Plataforma Educacional 3D de Osteologia Humana)
 - **Branch:** feat/testes-automatizados
 
 ## 2. Resumo da entrega
-Implementação da suíte de testes automatizados (unitários e de integração) cobrindo o núcleo de autenticação, segurança em dois fatores (2FA) e conformidade LGPD do OsteoLearn. Foram testadas regras de validação de senhas fortes, geração e expiração de hashes OTP SHA-256, isolamento de chamadas SMTP com mocks e fluxos completos de API REST com persistência em banco descartável.
+Implementação de testes automatizados (unitários e de integração) cobrindo o núcleo de autenticação, segurança em dois fatores (2FA) e conformidade LGPD do OsteoLearn. Foram testadas regras de validação de senhas fortes, geração e expiração de hashes OTP SHA-256, isolamento de chamadas SMTP com mocks e fluxos completos de API REST com persistência em banco descartável(SQLite).
 
 ## 3. Cenários de testes unitários implementados
 | # | Classe testada | Método / regra | Cenário | Tipo | Arquivo de teste | Método de teste |
