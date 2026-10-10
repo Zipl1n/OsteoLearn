@@ -84,6 +84,8 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'core.wsgi.application'
 
+import sys
+
 DATABASES = {
     'default': dj_database_url.config(
         default='postgresql://postgres.blulzvzmwvdtelcircgn:OxlRwk5pPUrIJaGR@aws-0-sa-east-1.pooler.supabase.com:5432/postgres',
@@ -91,6 +93,12 @@ DATABASES = {
         ssl_require=True
     )
 }
+
+if 'test' in sys.argv:
+    DATABASES['default'] = {
+        'ENGINE': 'django.db.backends.sqlite3',
+        'NAME': ':memory:',
+    }
 
 AUTH_PASSWORD_VALIDATORS = [
     {
