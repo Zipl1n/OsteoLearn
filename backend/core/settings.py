@@ -1,19 +1,18 @@
-"""
-Django settings for core project.
-OsteoLearn - Plataforma Educacional 3D (UMC)
-"""
-
+import os
 from pathlib import Path
 from datetime import timedelta
 import dj_database_url
+from dotenv import load_dotenv
+
+load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = 'django-insecure-j1@qkv69$-9mtc$p=@0@osgx*44dhetsg((je&)b@+)%yy^4p%'
+SECRET_KEY = os.getenv('SECRET_KEY', 'chave-temporaria-caso-nao-ache')
 
-DEBUG = True
+DEBUG = os.getenv('DEBUG', 'True') == 'True'
 
-ALLOWED_HOSTS = ['*']
+ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1,*').split(',')
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -22,21 +21,15 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-    'django.contrib.sites',
     'rest_framework',
-    'rest_framework.authtoken',
     'rest_framework_simplejwt',
     'corsheaders',
     'allauth',
     'allauth.account',
     'allauth.socialaccount',
     'allauth.socialaccount.providers.google',
-    'dj_rest_auth',
-    'dj_rest_auth.registration',
     'accounts',
 ]
-
-SITE_ID = 1
 
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
@@ -88,7 +81,7 @@ import sys
 
 DATABASES = {
     'default': dj_database_url.config(
-        default='postgresql://postgres.blulzvzmwvdtelcircgn:OxlRwk5pPUrIJaGR@aws-0-sa-east-1.pooler.supabase.com:5432/postgres',
+        default=os.getenv('DATABASE_URL'),
         conn_max_age=600,
         ssl_require=True
     )
@@ -123,18 +116,20 @@ SOCIALACCOUNT_LOGIN_ON_GET = True
 
 STATIC_URL = 'static/'
 
-# Envio Real de E-mail via SMTP do Gmail
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 EMAIL_HOST = 'smtp.gmail.com'
 EMAIL_PORT = 587
 EMAIL_USE_TLS = True
-EMAIL_HOST_USER = 'matheushso13.sb@gmail.com'
-EMAIL_HOST_PASSWORD = 'ifwz fbbe ydjd nzux'
-DEFAULT_FROM_EMAIL = 'OsteoLearn <matheushso13.sb@gmail.com>'
+EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER')
+EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD')
+DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'OsteoLearn <[EMAIL_ADDRESS]>')
 
 AUTH_USER_MODEL = 'accounts.User'
 
+frontend_origin = os.getenv('FRONTEND_URL', 'http://localhost:5173')
+
 CORS_ALLOWED_ORIGINS = [
+    frontend_origin,
     "http://localhost:5173",
     "http://127.0.0.1:5173",
 ]
@@ -149,11 +144,6 @@ REST_FRAMEWORK = {
     ),
 }
 
-REST_AUTH = {
-    'USE_JWT': True,
-    'JWT_AUTH_HTTPONLY': False,
-}
-
 SIMPLE_JWT = {
     'ACCESS_TOKEN_LIFETIME': timedelta(days=1),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
@@ -162,15 +152,13 @@ SIMPLE_JWT = {
     'AUTH_HEADER_TYPES': ('Bearer',),
 }
 
-# CONFIGURAÇÃO DE LOGIN COM GOOGLE
-SOCIALACCOUNT_LOGIN_ON_GET = True
 LOGIN_REDIRECT_URL = 'http://localhost:5173/'
 
 SOCIALACCOUNT_PROVIDERS = {
     'google': {
         'APP': {
-            'client_id': '992273325188-mbqtr4551691bobhpcglhdmq4kd015te.apps.googleusercontent.com',
-            'secret': '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',
+            'client_id': os.getenv('GOOGLE_CLIENT_ID'),
+            'secret': os.getenv('GOOGLE_CLIENT_SECRET'),
             'key': ''
         },
         'SCOPE': [

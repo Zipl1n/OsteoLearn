@@ -27,6 +27,17 @@ class User(AbstractUser):
     email = models.EmailField('E-mail', unique=True)
     name = models.CharField('Nome Completo', max_length=150)
 
+    ROLE_CHOICES = [
+        ('STUDENT', 'Estudante'),
+        ('ADM', 'Administrador'),
+    ]
+
+    role = models.CharField('Papel do Usuário', max_length=20, choices=ROLE_CHOICES, default='STUDENT')
+
+    @property
+    def is_admin(self):
+        return self.role == 'ADMIN' or self.is_staff or self.is_superuser
+
     lgpd_consent = models.BooleanField('Consentimento LGPD Concedido', default=False)
     lgpd_consent_version = models.CharField('Versão do Termo Aceito', max_length=20, default='1.0')
     lgpd_consent_at = models.DateTimeField('Data/Hora do Consentimento', null=True, blank=True)
@@ -122,3 +133,81 @@ class PasswordResetCode(models.Model):
             return False
         candidate_hash = hashlib.sha256(code_string.encode('utf-8')).hexdigest()
         return self.code_hash == candidate_hash
+
+
+class Bone(models.Model):
+    DIVISION_CHOICES = [
+        ('AXIAL', 'Esqueleto Axial'),
+        ('APENDICULAR', 'Esqueleto Apendicular'),
+    ]
+
+    name = models.CharField('Nome do Osso', max_length=120, unique=True)
+    scientific_name = models.CharField('Nome Científico (Latim)', max_length=120, blank=True)
+    region = models.CharField('Módulo / Região Anatômica', max_length=120, default='Crânio')
+    skeleton_division = models.CharField('Divisão do Esqueleto', max_length=20, choices=DIVISION_CHOICES, default='AXIAL')
+    model_url = models.CharField('Caminho do Modelo 3D (.glb)', max_length=255, blank=True, default='/models/os_temporal_gauche_humain.glb')
+    description = models.TextField('Descrição Geral do Osso', blank=True, default='')
+    clinical_summary = models.TextField('Resumo Clínico (Card de Relevância Clínica)', blank=True, default='')
+    is_active = models.BooleanField('Ativo no Atlas/Quiz?', default=True)
+
+    class Meta:
+        ordering = ['id']
+        verbose_name = 'Osso 3D'
+        verbose_name_plural = 'Ossos 3D'
+
+    def __str__(self):
+        return f"{self.name} ({self.region})"
+
+
+class AnatomicalLandmark(models.Model):
+    bone = models.ForeignKey(Bone, on_delete=models.CASCADE, related_name='landmarks', verbose_name='Osso')
+    order = models.PositiveIntegerField('Número da Etiqueta', default=1)
+    name = models.CharField('Nome do Acidente Anatômico', max_length=150)
+    description = models.TextField('Descrição Anatômica', blank=True, default='')
+    pos_x = models.FloatField('Coordenada 3D X', default=0.0)
+    pos_y = models.FloatField('Coordenada 3D Y', default=0.0)
+    pos_z = models.FloatField('Coordenada 3D Z', default=0.0)
+
+    class Meta:
+        ordering = ['bone', 'order', 'id']
+        verbose_name = 'Acidente Anatômico (Ponto 3D)'
+        verbose_name_plural = 'Acidentes Anatômicos (Pontos 3D)'
+
+    def __str__(self):
+        return f"{self.order}. {self.name} ({self.bone.name})"
+
+
+class BonePathology(models.Model):
+    bone = models.ForeignKey(Bone, on_delete=models.CASCADE, related_name='pathologies', verbose_name='Osso')
+    title = models.CharField('Título da Patologia', max_length=150)
+    description = models.TextField('Descrição Clínica')
+
+    class Meta:
+        ordering = ['bone', 'id']
+        verbose_name = 'Patologia / Relevância Clínica'
+        verbose_name_plural = 'Patologias / Relevâncias Clínicas'
+
+    def __str__(self):
+        return f"{self.title} ({self.bone.name})"
+
+
+class QuizQuestion(models.Model):
+    bone = models.ForeignKey(Bone, on_delete=models.CASCADE, related_name='questions', verbose_name='Osso')
+    correct_answer = models.CharField('Acidente Anatômico Correto', max_length=150)
+    option_a = models.CharField('Alternativa A', max_length=150)
+    option_b = models.CharField('Alternativa B', max_length=150)
+    option_c = models.CharField('Alternativa C', max_length=150)
+    option_d = models.CharField('Alternativa D', max_length=150)
+    pos_x = models.FloatField('Coordenada 3D X')
+    pos_y = models.FloatField('Coordenada 3D Y')
+    pos_z = models.FloatField('Coordenada 3D Z')
+    is_active = models.BooleanField('Questão Ativa?', default=True)
+    created_at = models.DateTimeField('Criado em', auto_now_add=True)
+
+    class Meta:
+        ordering = ['id']
+        verbose_name = 'Questão do Quiz 3D (Alfinetada)'
+        verbose_name_plural = 'Questões do Quiz 3D (Alfinetada)'
+
+    def __str__(self):
+        return f"[{self.bone.name}] {self.correct_answer} ({self.pos_x}, {self.pos_y}, {self.pos_z})"

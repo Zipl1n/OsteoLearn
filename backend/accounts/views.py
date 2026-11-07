@@ -1,6 +1,7 @@
 import secrets
 from django.core.mail import send_mail
 from django.conf import settings
+from django.utils import timezone
 from rest_framework import status, permissions
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -87,23 +88,9 @@ class RegisterView(APIView):
         serializer = RegisterSerializer(data=request.data, context={'request': request})
         if serializer.is_valid():
             user = serializer.save()
+
             ip = get_client_ip(request)
             user_agent = request.META.get('HTTP_USER_AGENT', '')
-
-            AuditLog.objects.create(
-                user=user,
-                action='USER_REGISTER',
-                ip_address=ip,
-                user_agent=user_agent,
-                details={'event': 'Conta criada com aceite dos Termos v1.0'}
-            )
-            AuditLog.objects.create(
-                user=user,
-                action='CONSENT_ACCEPTED',
-                ip_address=ip,
-                user_agent=user_agent,
-                details={'terms_version': '1.0'}
-            )
 
             code = f"{secrets.randbelow(900000) + 100000}"
             TwoFactorCode.create_for_user(user, code, validity_minutes=5)
@@ -111,18 +98,25 @@ class RegisterView(APIView):
 
             AuditLog.objects.create(
                 user=user,
+                action='USER_REGISTER',
+                ip_address=ip,
+                user_agent=user_agent,
+                details={'method': 'email'}
+            )
+            AuditLog.objects.create(
+                user=user,
                 action='2FA_SENT',
                 ip_address=ip,
                 user_agent=user_agent,
-                details={'event': 'Código 2FA enviado no cadastro'}
+                details={'method': 'email'}
             )
 
             return Response({
                 'requires_2fa': True,
                 'email': user.email,
-                'message': 'Conta criada com sucesso! Enviamos um código de verificação de 6 dígitos para seu e-mail.'
+                'message': 'Conta criada! Enviamos um código de verificação para o seu e-mail.'
             }, status=status.HTTP_201_CREATED)
-        
+
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
@@ -263,14 +257,18 @@ class PasswordResetRequestView(APIView):
                 user_agent=user_agent,
                 details={'method': 'email'}
             )
-            return Response({
-                'message': 'Código de recuperação de 6 dígitos enviado para seu e-mail!'
-            }, status=status.HTTP_200_OK)
         else:
-            print(f">> [RESET] Atencao: Usuario com e-mail '{email}' NAO foi encontrado no banco!")
-            return Response({
-                'error': 'Não encontramos nenhuma conta com este e-mail. Verifique se digitou corretamente ou crie uma conta.'
-            }, status=status.HTTP_404_NOT_FOUND)
+            AuditLog.objects.create(
+                user=None,
+                action='PASSWORD_RESET_REQUEST',
+                ip_address=ip,
+                user_agent=user_agent,
+                details={'method': 'email', 'attempted_email': email, 'status': 'not_found'}
+            )
+
+        return Response({
+            'message': 'Se o e-mail informado estiver cadastrado em nossa plataforma, enviamos um código de verificação para ele.'
+        }, status=status.HTTP_200_OK)
 
 
 class PasswordResetConfirmView(APIView):
@@ -358,6 +356,33 @@ class LGPDExportDataView(APIView):
             }
         })
 
+
+class LGPDConsentView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        user = request.user
+        user.lgpd_consent = True
+        user.lgpd_consent_version = '1.0'
+        user.lgpd_consent_at = timezone.now()
+        user.save()
+
+        ip = get_client_ip(request)
+        user_agent = request.META.get('HTTP_USER_AGENT', '')
+        AuditLog.objects.create(
+            user=user,
+            action='LGPD_CONSENT',
+            ip_address=ip,
+            user_agent=user_agent,
+            details={'version': '1.0', 'method': 'oauth_modal'}
+        )
+
+        return Response({
+            'message': 'Consentimento LGPD registrado com sucesso!',
+            'user': UserSerializer(user).data
+        }, status=status.HTTP_200_OK)
+
+
 class DeleteAccountView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
@@ -376,4 +401,1718 @@ class DeleteAccountView(APIView):
         )
 
         user.delete()
-        return Response({'message': 'Conta e dados pessoais excluídos com sucesso conforme a LGPD.'}, status=status.HTTP_200_OK)
+        return Response({'message': 'Conta e dados pessoais excluídos com sucesso conforme a LGPD.'}, status=status.HTTP_200_OK)
+
+
+class AdminAuditLogsView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        if not getattr(request.user, 'is_admin', False):
+            return Response(
+                {'error': 'Acesso negado. Apenas administradores podem consultar os logs de auditoria.'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        logs = AuditLog.objects.select_related('user').all().order_by('-timestamp')[:150]
+
+        data = []
+        for log in logs:
+            data.append({
+                'id': log.id,
+                'user_email': log.user.email if log.user else 'Anônimo / Não identificado',
+                'user_name': log.user.name if log.user else 'Visitante',
+                'action': log.action,
+                'action_display': log.get_action_display(),
+                'ip_address': log.ip_address,
+                'user_agent': log.user_agent,
+                'timestamp': log.timestamp.strftime('%d/%m/%Y %H:%M:%S'),
+                'details': log.details
+            })
+
+        summary = {
+            'total_users': User.objects.count(),
+            'total_logins': AuditLog.objects.filter(action__in=['LOGIN_SUCCESS', '2FA_VERIFIED']).count(),
+            'total_bones': Bone.objects.filter(is_active=True).count(),
+            'total_landmarks': AnatomicalLandmark.objects.count(),
+            'total_questions': QuizQuestion.objects.filter(is_active=True).count(),
+            'total_events': AuditLog.objects.count(),
+        }
+
+        return Response({'logs': data, 'total': len(data), 'summary': summary}, status=status.HTTP_200_OK)
+
+
+from .models import Bone, AnatomicalLandmark, BonePathology, QuizQuestion
+
+
+DEFAULT_TEMPORAL_QUESTIONS = [
+    {
+        'correct_answer': 'Processo Mastóide',
+        'options': ['Meato Acústico Interno', 'Processo Mastóide', 'Processo Estiloide', 'Fossa Mandibular'],
+        'pos': [-0.12, -1.12, -0.5],
+    },
+    {
+        'correct_answer': 'Processo Zigomático',
+        'options': ['Processo Zigomático', 'Parte Escamosa', 'Tubérculo Articular', 'Meato Acústico Externo'],
+        'pos': [1.5, -0.34, -0.05],
+    },
+    {
+        'correct_answer': 'Meato Acústico Interno',
+        'options': ['Fossa Jugular', 'Canal Carótico', 'Meato Acústico Interno', 'Meato Acústico Externo'],
+        'pos': [-0.68, -0.22, 0.48],
+    },
+    {
+        'correct_answer': 'Meato Acústico Externo',
+        'options': ['Forame Estilomastóideo', 'Meato Acústico Externo', 'Fissura Petrotimpânica', 'Fossa Mandibular'],
+        'pos': [-0.12, -0.5, -0.5],
+    },
+    {
+        'correct_answer': 'Fossa Mandibular',
+        'options': ['Incisura Mastóidea', 'Parte Petrosa', 'Processo Zigomático', 'Fossa Mandibular'],
+        'pos': [-0.15, -0.45, 0.17],
+    },
+    {
+        'correct_answer': 'Parte Escamosa',
+        'options': ['Parte Escamosa', 'Parte Timpânica', 'Processo Mastóide', 'Ápice Petroso'],
+        'pos': [0.25, 0.58, -0.53],
+    },
+    {
+        'correct_answer': 'Parte Petrosa (Rochedo)',
+        'options': ['Processo Zigomático', 'Parte Petrosa (Rochedo)', 'Tubérculo Articular', 'Eminência Arqueada'],
+        'pos': [-0.7, -0.13, 0.45],
+    },
+    {
+        'correct_answer': 'Incisura Mastóidea',
+        'options': ['Sulco do Seio Sigmoide', 'Fossa Mandibular', 'Incisura Mastóidea', 'Meato Acústico Externo'],
+        'pos': [-0.43, -1.04, -0.27],
+    },
+    {
+        'correct_answer': 'Tubérculo Articular',
+        'options': ['Tubérculo Articular', 'Processo Estiloide', 'Crista Supramastóidea', 'Meato Acústico Interno'],
+        'pos': [0.65, -0.57, -0.38],
+    },
+    {
+        'correct_answer': 'Sulco da Artéria Temporal Média',
+        'options': ['Canal Facial', 'Forame Mastóideo', 'Fossa Subarqueada', 'Sulco da Artéria Temporal Média'],
+        'pos': [0.05, 0.37, -0.7],
+    },
+    {
+        'correct_answer': 'Ápice Petroso',
+        'options': ['Ápice Petroso', 'Processo Mastóide', 'Tubérculo Articular', 'Borda Parietal'],
+        'pos': [-1.57, -0.24, -0.95],
+    },
+    {
+        'correct_answer': 'Crista Supramastóidea',
+        'options': ['Incisura Mastóidea', 'Crista Supramastóidea', 'Meato Acústico Interno', 'Fossa Jugular'],
+        'pos': [0.05, -0.23, -0.66],
+    },
+    {
+        'correct_answer': 'Borda Parietal',
+        'options': ['Borda Parietal', 'Processo Estiloide', 'Fossa Mandibular', 'Meato Acústico Externo'],
+        'pos': [0.19, 1.34, -0.26],
+    },
+    {
+        'correct_answer': 'Eminência Arqueada',
+        'options': ['Processo Zigomático', 'Tubérculo Articular', 'Eminência Arqueada', 'Parte Timpânica'],
+        'pos': [-0.53, -0.05, 0.72],
+    },
+    {
+        'correct_answer': 'Parte Timpânica',
+        'options': ['Parte Escamosa', 'Borda Parietal', 'Ápice Petroso', 'Parte Timpânica'],
+        'pos': [-0.03, -0.57, -0.4],
+    },
+]
+
+
+def ensure_default_quiz_seeded():
+    bone, _ = Bone.objects.get_or_create(
+        name='Osso Temporal',
+        defaults={
+            'scientific_name': 'Os temporale',
+            'region': 'Crânio & Viscerocrânio',
+            'skeleton_division': 'AXIAL',
+            'model_url': '/models/os_temporal_gauche_humain.glb',
+            'is_active': True,
+        }
+    )
+
+    if bone.questions.count() < 15:
+        for item in DEFAULT_TEMPORAL_QUESTIONS:
+            QuizQuestion.objects.update_or_create(
+                bone=bone,
+                correct_answer=item['correct_answer'],
+                defaults={
+                    'option_a': item['options'][0],
+                    'option_b': item['options'][1],
+                    'option_c': item['options'][2],
+                    'option_d': item['options'][3],
+                    'pos_x': item['pos'][0],
+                    'pos_y': item['pos'][1],
+                    'pos_z': item['pos'][2],
+                    'is_active': True,
+                }
+            )
+    return bone
+
+
+class QuizQuestionsView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request):
+        ensure_default_atlas_seeded()
+        bone_id = request.query_params.get('bone_id')
+        bone_name = request.query_params.get('bone_name')
+
+        bone = None
+        if bone_id:
+            bone = Bone.objects.filter(id=bone_id, is_active=True).first()
+        if not bone and bone_name:
+            bone = Bone.objects.filter(name__iexact=bone_name, is_active=True).first()
+        if not bone:
+            bone = Bone.objects.filter(name='Osso Temporal', is_active=True).first() or Bone.objects.filter(is_active=True).first()
+
+        questions = bone.questions.filter(is_active=True).order_by('id')
+        landmarks_count = bone.landmarks.count()
+        if landmarks_count <= 4:
+            max_lives = 1
+        elif landmarks_count <= 7:
+            max_lives = 2
+        else:
+            max_lives = 3
+
+        data = []
+        for q in questions:
+            data.append({
+                'id': q.id,
+                'boneName': bone.name,
+                'region': bone.region,
+                'correctAnswer': q.correct_answer,
+                'options': [q.option_a, q.option_b, q.option_c, q.option_d],
+                'pos3D': [q.pos_x, q.pos_y, q.pos_z],
+            })
+
+        return Response({
+            'bone': {
+                'id': bone.id,
+                'name': bone.name,
+                'scientificName': bone.scientific_name,
+                'region': bone.region,
+                'modelUrl': bone.model_url,
+                'landmarksCount': landmarks_count,
+                'maxLives': max_lives,
+            },
+            'totalPool': len(data),
+            'questions': data,
+        }, status=status.HTTP_200_OK)
+
+
+DEFAULT_ATLAS_BONES = [{'name': 'Osso Temporal',
+  'scientific_name': 'Os temporale',
+  'region': 'Crânio',
+  'skeleton_division': 'AXIAL',
+  'model_url': '/models/os_temporal_gauche_humain.glb',
+  'description': 'Osso par e irregular situado na porção lateral e inferior do neurocrânio, abrigando os órgãos da '
+                 'audição e do equilíbrio.',
+  'clinical_summary': 'Fraturas na região do osso temporal podem afetar estruturas vasculares (artéria carótida '
+                      'interna e artéria meníngea média) e os nervos facial (VII) e vestibulococlear (VIII).',
+  'landmarks': [{'order': 1,
+                 'name': 'Meato Acústico Interno',
+                 'description': 'Abertura na face posterior da parte petrosa por onde transitam os nervos facial '
+                                '(VII), vestibulococlear (VIII) e a artéria do labirinto.',
+                 'pos': [-0.68, -0.22, 0.48]},
+                {'order': 2,
+                 'name': 'Meato Acústico Externo',
+                 'description': 'Canal ósseo lateral na parte timpânica que conduz as ondas sonoras da orelha externa '
+                                'até a membrana timpânica.',
+                 'pos': [-0.12, -0.5, -0.5]},
+                {'order': 3,
+                 'name': 'Processo Zigomático',
+                 'description': 'Projeção anterior que se articula com o processo temporal do osso zigomático para '
+                                'formar o arco zigomático.',
+                 'pos': [1.5, -0.34, -0.05]},
+                {'order': 4,
+                 'name': 'Processo Mastóide',
+                 'description': 'Proeminência cônica inferior que contém as células mastóideas e serve de inserção '
+                                'para o músculo esternocleidomastóideo.',
+                 'pos': [-0.12, -1.12, -0.5]},
+                {'order': 5,
+                 'name': 'Fossa Mandibular',
+                 'description': 'Depressão côncava que se articula com o côndilo da mandíbula, formando a articulação '
+                                'temporomandibular (ATM).',
+                 'pos': [-0.15, -0.45, 0.17]},
+                {'order': 6,
+                 'name': 'Parte Escamosa',
+                 'description': 'Lâmina óssea fina e expandida superiormente que compõe a parede lateral da fossa '
+                                'craniana média.',
+                 'pos': [0.25, 0.58, -0.53]},
+                {'order': 7,
+                 'name': 'Parte Petrosa (Rochedo)',
+                 'description': 'Porção piramidal extremamente densa na base do crânio que protege a cóclea e os '
+                                'canais semicirculares.',
+                 'pos': [-0.7, -0.13, 0.45]},
+                {'order': 8,
+                 'name': 'Tubérculo Articular',
+                 'description': 'Elevação óssea anterior à fossa mandibular sobre a qual o côndilo da mandíbula '
+                                'desliza durante a abertura bucal.',
+                 'pos': [0.65, -0.57, -0.38]}],
+  'pathologies': [{'title': 'Fratura da Base do Crânio',
+                   'description': 'Pode envolver a porção petrosa do osso temporal, resultando em otorragia, fístula '
+                                  'liquórica (otoliquorreia), sinal de Battle ou perda auditiva.'},
+                  {'title': 'Mastoidite Aguda',
+                   'description': 'Infecção bacteriana das células aéreas mastóideas secundária à otite média aguda, '
+                                  'com risco de disseminação intracraniana.'},
+                  {'title': 'Disfunção Temporomandibular (DTM)',
+                   'description': 'Alteração biomecânica ou inflamatória entre o côndilo mandibular, a fossa '
+                                  'mandibular e o tubérculo articular.'}]},
+ {'name': 'Osso Frontal',
+  'scientific_name': 'Os frontale',
+  'region': 'Crânio',
+  'skeleton_division': 'AXIAL',
+  'model_url': '/models/human_frontal_bone.glb',
+  'description': 'Osso ímpar e pneumático que forma a região anterior da calota craniana (testa) e o teto das '
+                 'cavidades orbitais.',
+  'clinical_summary': 'Traumas de alta energia na região frontal podem comprometer o seio frontal e a lâmina '
+                      'cribriforme adjacente, exigindo avaliação neurocirúrgica.',
+  'landmarks': [{'order': 1,
+                 'name': 'Escama Frontal',
+                 'description': 'Ampla superfície convexa anterior que forma a testa e protege os lobos frontais do '
+                                'cérebro.',
+                 'pos': [0.0, 0.75, 0.55]},
+                {'order': 2,
+                 'name': 'Túber Frontal (Eminência Frontal)',
+                 'description': 'Proeminência arredondada bilateral na face externa da escama frontal.',
+                 'pos': [0.55, 0.45, 0.6]},
+                {'order': 3,
+                 'name': 'Arco Superciliar',
+                 'description': 'Crista óssea arqueada localizada superiormente à margem supraorbital.',
+                 'pos': [0.45, 0.05, 0.72]},
+                {'order': 4,
+                 'name': 'Glabela',
+                 'description': 'Área mediana lisa situada entre os dois arcos superciliares, acima da raiz do nariz.',
+                 'pos': [0.0, 0.05, 0.78]},
+                {'order': 5,
+                 'name': 'Margem Supraorbital',
+                 'description': 'Borda superior curva da abertura orbital que protege o bulbo ocular.',
+                 'pos': [0.5, -0.2, 0.68]},
+                {'order': 6,
+                 'name': 'Incisura / Forame Supraorbital',
+                 'description': 'Passagem na margem supraorbital para o nervo e vasos supraorbitais.',
+                 'pos': [0.3, -0.18, 0.72]},
+                {'order': 7,
+                 'name': 'Processo Zigomático do Frontal',
+                 'description': 'Projeção inferolateral robusta que se articula com o osso zigomático.',
+                 'pos': [0.85, -0.35, 0.45]},
+                {'order': 8,
+                 'name': 'Parte Orbital (Teto da Órbita)',
+                 'description': 'Lâmina horizontal triangular que separa a cavidade orbital da fossa craniana '
+                                'anterior.',
+                 'pos': [0.45, -0.5, 0.2]}],
+  'pathologies': [{'title': 'Fratura da Tábua Anterior e Posterior do Seio Frontal',
+                   'description': 'Impactos diretos na testa podem afundar o seio frontal e causar fístula liquórica '
+                                  'se atingir a dura-máter.'},
+                  {'title': 'Sinusite Frontal Complicada (Tumor de Pott)',
+                   'description': 'Osteomielite da parede anterior do osso frontal associada a abscesso '
+                                  'subperiosteal.'}]},
+ {'name': 'Osso Esfenoide',
+  'scientific_name': 'Os sphenoidale',
+  'region': 'Crânio',
+  'skeleton_division': 'AXIAL',
+  'model_url': '/models/human_sphenoid_bone.glb',
+  'description': 'Osso ímpar em forma de borboleta na base média do crânio, articulando-se com todos os outros ossos '
+                 'cranianos.',
+  'clinical_summary': 'A sela túrcica abriga a glândula hipófise; tumores hipofisários podem comprimir o quiasma '
+                      'óptico logo acima.',
+  'landmarks': [{'order': 1,
+                 'name': 'Sela Túrcica (Fossa Hipofisária)',
+                 'description': 'Depressão mediana no corpo do esfenoide que aloja a glândula hipófise.',
+                 'pos': [0.0, 0.25, 0.1]},
+                {'order': 2,
+                 'name': 'Asa Menor do Esfenoide',
+                 'description': 'Lâmina triangular superior que delimita o canal óptico e a fissura orbital superior.',
+                 'pos': [0.45, 0.48, 0.3]},
+                {'order': 3,
+                 'name': 'Asa Maior do Esfenoide',
+                 'description': 'Projeção lateral ampla que compõe o assoalho da fossa média e a parede lateral da '
+                                'órbita.',
+                 'pos': [0.9, 0.15, 0.2]},
+                {'order': 4,
+                 'name': 'Canal Óptico e Fissura Orbital Superior',
+                 'description': 'Passagens para o nervo óptico (II) e nervos oculomotor (III), troclear (IV), '
+                                'abducente (VI) e ramo oftálmico (V1).',
+                 'pos': [0.3, 0.32, 0.28]},
+                {'order': 5,
+                 'name': 'Lâmina Lateral do Processo Pterigoide',
+                 'description': 'Projeção inferior que serve de origem para os músculos pterigóideos medial e lateral.',
+                 'pos': [0.42, -0.5, 0.15]},
+                {'order': 6,
+                 'name': 'Lâmina Medial e Hâmulo Pterigóideo',
+                 'description': 'Lâmina estreita que delimita posteriormente as coanas nasais.',
+                 'pos': [0.22, -0.55, 0.05]},
+                {'order': 7,
+                 'name': 'Corpo do Esfenoide e Seio Esfenoidal',
+                 'description': 'Porção central cúbica pneumatizada que se articula com o clivo occipital.',
+                 'pos': [0.0, -0.05, -0.25]}],
+  'pathologies': [{'title': 'Adenoma Hipofisário e Hemianopsia Bitemporal',
+                   'description': 'Expansões na sela túrcica comprimem o quiasma óptico, causando perda dos campos '
+                                  'visuais laterais.'},
+                  {'title': 'Síndrome da Fissura Orbital Superior',
+                   'description': 'Lesão traumática ou inflamatória causando oftalmoplegia e anestesia '
+                                  'frontal/corneana.'}]},
+ {'name': 'Osso Occipital',
+  'scientific_name': 'Os occipitale',
+  'region': 'Crânio',
+  'skeleton_division': 'AXIAL',
+  'model_url': '/models/model_1_occipital_bone.glb',
+  'description': 'Osso ímpar que forma a região posteroinferior do neurocrânio e a base craniana ao redor do forame '
+                 'magno.',
+  'clinical_summary': 'O forame magno estabelece a transição crítica entre o bulbo (medula oblonga) e a medula '
+                      'espinal.',
+  'landmarks': [{'order': 1,
+                 'name': 'Forame Magno',
+                 'description': 'Grande abertura oval por onde passam a medula oblonga, meninges e artérias '
+                                'vertebrais.',
+                 'pos': [0.0, -0.55, 0.1]},
+                {'order': 2,
+                 'name': 'Escama Occipital',
+                 'description': 'Ampla lâmina curva posterior que aloja os lobos occipitais e o cerebelo.',
+                 'pos': [0.0, 0.55, -0.65]},
+                {'order': 3,
+                 'name': 'Protuberância Occipital Externa (Ínio)',
+                 'description': 'Proeminência mediana posterior palpável para inserção do ligamento nucal e músculo '
+                                'trapézio.',
+                 'pos': [0.0, 0.15, -0.85]},
+                {'order': 4,
+                 'name': 'Linhas Nucais Superior e Inferior',
+                 'description': 'Cristas transversais curvas para fixação da musculatura suboccipital e extensora do '
+                                'pescoço.',
+                 'pos': [0.45, 0.05, -0.75]},
+                {'order': 5,
+                 'name': 'Côndilos Occipitais',
+                 'description': 'Projeções ovais laterais ao forame magno que se articulam com a 1ª vértebra cervical '
+                                '(Atlas).',
+                 'pos': [0.35, -0.7, 0.2]},
+                {'order': 6,
+                 'name': 'Parte Basilar (Clivo)',
+                 'description': 'Porção espessa anterior ao forame magno que sustenta a ponte e o bulbo.',
+                 'pos': [0.0, -0.45, 0.65]}],
+  'pathologies': [{'title': 'Herniação Tonsilar (Malformação de Chiari)',
+                   'description': 'Deslocamento das tonsilas cerebelares através do forame magno por hipertensão '
+                                  'intracraniana ou alteração congênita.'},
+                  {'title': 'Fratura Condilar Occipital',
+                   'description': 'Lesão da junção craniovertebral por trauma axial de alta energia.'}]},
+ {'name': 'Osso Etmoide',
+  'scientific_name': 'Os ethmoidale',
+  'region': 'Crânio',
+  'skeleton_division': 'AXIAL',
+  'model_url': '/models/ethmoid_bone__hueso_etmoides.glb',
+  'description': 'Osso leve e esponjoso situado entre as órbitas, compondo o teto da cavidade nasal e o septo nasal '
+                 'superior.',
+  'clinical_summary': 'Fraturas da lâmina cribriforme podem lesar os filamentos do nervo olfatório (I par), provocando '
+                      'anosmia e rinoliquorreia.',
+  'landmarks': [{'order': 1,
+                 'name': 'Crista Galli',
+                 'description': 'Projeção triangular mediana superior onde se fixa a foice do cérebro.',
+                 'pos': [0.0, 0.85, 0.1]},
+                {'order': 2,
+                 'name': 'Lâmina Cribriforme (Crivosa)',
+                 'description': 'Superfície horizontal multiperfurada atravessada pelos filetes do nervo olfatório.',
+                 'pos': [0.25, 0.55, 0.15]},
+                {'order': 3,
+                 'name': 'Lâmina Perpendicular',
+                 'description': 'Lâmina mediana inferior que forma a porção posterossuperior do septo nasal ósseo.',
+                 'pos': [0.0, -0.5, 0.25]},
+                {'order': 4,
+                 'name': 'Labirinto Etmoidal (Lâmina Orbital / Papirácea)',
+                 'description': 'Massas laterais pneumatizadas que formam a parede medial da órbita.',
+                 'pos': [0.75, 0.1, 0.0]},
+                {'order': 5,
+                 'name': 'Conchas Nasais Superior e Média',
+                 'description': 'Projeções curvas mediais que aumentam a superfície de aquecimento e filtração do ar '
+                                'inspirado.',
+                 'pos': [0.45, -0.35, -0.2]}],
+  'pathologies': [{'title': 'Rinoliquorreia Pós-Traumática e Anosmia',
+                   'description': 'Ruptura da lâmina cribriforme com extravasamento de líquor pelo nariz e perda do '
+                                  'olfato.'},
+                  {'title': 'Etmoidite Aguda e Celulite Orbitária',
+                   'description': 'Propagação infecciosa das células etmoidais através da fina lâmina papirácea para a '
+                                  'órbita.'}]},
+ {'name': 'Mandíbula',
+  'scientific_name': 'Mandibula',
+  'region': 'Crânio',
+  'skeleton_division': 'AXIAL',
+  'model_url': '/models/mandible.glb',
+  'description': 'O maior, mais forte e único osso móvel do viscerocrânio, sustentando a arcada dentária inferior.',
+  'clinical_summary': 'O forame da mandíbula e o forame mentual são pontos anatômicos essenciais para bloqueios '
+                      'anestésicos odontológicos.',
+  'landmarks': [{'order': 1,
+                 'name': 'Processo Condilar (Cabeça da Mandíbula)',
+                 'description': 'Extremidade articular posterossuperior que compõe a ATM com a fossa mandibular.',
+                 'pos': [0.95, 0.75, -0.45]},
+                {'order': 2,
+                 'name': 'Processo Coronoide',
+                 'description': 'Projeção triangular anterossuperior onde se insere o músculo temporal.',
+                 'pos': [0.75, 0.65, 0.05]},
+                {'order': 3,
+                 'name': 'Incisura da Mandíbula',
+                 'description': 'Concavidade superior situada entre o processo coronoide e o processo condilar.',
+                 'pos': [0.85, 0.55, -0.2]},
+                {'order': 4,
+                 'name': 'Ramo da Mandíbula',
+                 'description': 'Lâmina vertical quadrangular lateral para inserção dos músculos masseter e '
+                                'pterigóideo medial.',
+                 'pos': [0.88, 0.1, -0.25]},
+                {'order': 5,
+                 'name': 'Ângulo da Mandíbula (Gônio)',
+                 'description': 'Junção posteroinferior entre o corpo e o ramo da mandíbula.',
+                 'pos': [0.85, -0.45, -0.35]},
+                {'order': 6,
+                 'name': 'Corpo da Mandíbula e Parte Alveolar',
+                 'description': 'Porção horizontal em forma de ferradura que aloja os dentes inferiores.',
+                 'pos': [0.55, -0.3, 0.35]},
+                {'order': 7,
+                 'name': 'Forame Mentual',
+                 'description': 'Abertura anterolateral no corpo mandibular por onde emergem o nervo e vasos mentuais.',
+                 'pos': [0.42, -0.42, 0.65]},
+                {'order': 8,
+                 'name': 'Protuberância Mentual (Sínfise da Mandíbula)',
+                 'description': 'Elevação triangular mediana anterior que forma o queixo.',
+                 'pos': [0.0, -0.5, 0.85]}],
+  'pathologies': [{'title': 'Luxação da ATM e Fratura Subcondilar',
+                   'description': 'Deslocamento anterior do côndilo mandibular além do tubérculo articular ou fratura '
+                                  'pós-trauma no queixo.'},
+                  {'title': 'Lesão do Nervo Alveolar Inferior',
+                   'description': 'Risco cirúrgico durante exodontia de terceiros molares inferiores inclusos.'}]},
+ {'name': 'Maxila e Osso Palatino',
+  'scientific_name': 'Maxilla et Os palatinum',
+  'region': 'Crânio',
+  'skeleton_division': 'AXIAL',
+  'model_url': '/models/maxilla_and_palatine.glb',
+  'description': 'Formam o esqueleto central da face, o palato duro (céu da boca), o assoalho da órbita e a arcada '
+                 'dentária superior.',
+  'clinical_summary': 'As fraturas de Le Fort (tipos I, II e III) classificam as disjunções traumáticas do complexo '
+                      'maxilofacial.',
+  'landmarks': [{'order': 1,
+                 'name': 'Processo Frontal da Maxila',
+                 'description': 'Projeção ascendente medial que se articula com os ossos frontal, nasal e lacrimal.',
+                 'pos': [0.25, 0.75, 0.35]},
+                {'order': 2,
+                 'name': 'Margem e Face Orbital da Maxila',
+                 'description': 'Forma a maior parte do assoalho da cavidade orbital.',
+                 'pos': [0.45, 0.4, 0.45]},
+                {'order': 3,
+                 'name': 'Forame Infraorbital',
+                 'description': 'Abertura abaixo da margem orbital para passagem do nervo e vasos infraorbitais.',
+                 'pos': [0.45, 0.2, 0.55]},
+                {'order': 4,
+                 'name': 'Espinha Nasal Anterior e Incisura Nasal',
+                 'description': 'Projeção mediana óssea na base da abertura piriforme.',
+                 'pos': [0.0, -0.1, 0.65]},
+                {'order': 5,
+                 'name': 'Processo Alveolar Superior',
+                 'description': 'Arco ósseo inferior que sustenta os alvéolos dentários superiores.',
+                 'pos': [0.35, -0.65, 0.45]},
+                {'order': 6,
+                 'name': 'Processo Palatino e Lâmina Horizontal do Palatino',
+                 'description': 'Formam o palato duro ósseo separando a cavidade oral da cavidade nasal.',
+                 'pos': [0.0, -0.45, 0.05]}],
+  'pathologies': [{'title': 'Fraturas Maxilares de Le Fort (I, II e III)',
+                   'description': 'Padrões clássicos de fratura transfacial que separam o palato ou a face média da '
+                                  'base do crânio.'},
+                  {'title': 'Fissura Palatina Congênita',
+                   'description': 'Falha na fusão embrionária dos processos palatinos comunicando as cavidades oral e '
+                                  'nasal.'}]},
+ {'name': 'Osso Zigomático',
+  'scientific_name': 'Os zygomaticum',
+  'region': 'Crânio',
+  'skeleton_division': 'AXIAL',
+  'model_url': '/models/zygomatic_bone_3d_scanning.glb',
+  'description': 'Osso par que forma a proeminência da bochecha (maçã do rosto) e a parede lateral e inferior da '
+                 'órbita.',
+  'clinical_summary': 'Fraturas do complexo zigomático-orbitário podem causar diplopia (visão dupla) por '
+                      'aprisionamento muscular orbital.',
+  'landmarks': [{'order': 1,
+                 'name': 'Processo Frontal do Zigomático',
+                 'description': 'Projeção superior que se articula com o osso frontal e a asa maior do esfenoide.',
+                 'pos': [0.15, 0.8, 0.2]},
+                {'order': 2,
+                 'name': 'Processo Temporal do Zigomático',
+                 'description': 'Projeção posterior que se une ao processo zigomático do temporal formando o arco '
+                                'zigomático.',
+                 'pos': [-0.85, -0.25, 0.15]},
+                {'order': 3,
+                 'name': 'Processo Maxilar e Margem Infraorbital',
+                 'description': 'Articula-se medialmente com a maxila na borda anteroinferior da órbita.',
+                 'pos': [0.65, -0.2, 0.35]},
+                {'order': 4,
+                 'name': 'Face Lateral e Forame Zigomaticofacial',
+                 'description': 'Superfície convexa da bochecha perfurada pelo ramo nervoso zigomaticofacial.',
+                 'pos': [0.1, 0.0, 0.45]},
+                {'order': 5,
+                 'name': 'Face Orbital do Zigomático',
+                 'description': 'Superfície côncava interna que participa da parede anterolateral da órbita.',
+                 'pos': [0.35, 0.3, 0.15]}],
+  'pathologies': [{'title': 'Fratura em Tripé (Complexo Zigomático-Maxilar)',
+                   'description': 'Envolve as suturas zigomaticofrontal, zigomaticotemporal e zigomaticomaxilar com '
+                                  'assimetria malar.'},
+                  {'title': 'Fratura Blow-out da Órbita',
+                   'description': 'Afundamento das paredes orbitais com encarceramento do músculo reto inferior.'}]},
+ {'name': 'Osso Nasal',
+  'scientific_name': 'Os nasale',
+  'region': 'Crânio',
+  'skeleton_division': 'AXIAL',
+  'model_url': '/models/nasal_bone__hueso_nasal.glb',
+  'description': 'Par de pequenos ossos oblongos que se unem na linha mediana para formar a ponte superior (dorso) do '
+                 'nariz.',
+  'clinical_summary': 'Por sua posição projetada na face, os ossos nasais são os mais frequentemente fraturados em '
+                      'traumas faciais.',
+  'landmarks': [{'order': 1,
+                 'name': 'Extremidade Superior (Násio / Sutura Frontonasal)',
+                 'description': 'Porção cranial espessa que se articula com a parte nasal do osso frontal.',
+                 'pos': [0.0, 0.8, 0.3]},
+                {'order': 2,
+                 'name': 'Borda Medial (Sutura Internasal)',
+                 'description': 'Margem vertical que se une ao osso nasal contralateral na linha mediana.',
+                 'pos': [-0.25, 0.1, 0.35]},
+                {'order': 3,
+                 'name': 'Face Externa (Dorso Nasal) e Forame Nasal',
+                 'description': 'Superfície convexa recoberta pelo músculo prócero e pele do nariz.',
+                 'pos': [0.05, 0.0, 0.45]},
+                {'order': 4,
+                 'name': 'Borda Inferior Livre (Abertura Piriforme)',
+                 'description': 'Margem distal fina que se une às cartilagens nasais laterais.',
+                 'pos': [0.15, -0.75, 0.45]}],
+  'pathologies': [{'title': 'Fratura dos Ossos Próprios do Nariz (FOPN)',
+                   'description': 'Desalinhamento ósseo do dorso nasal frequentemente acompanhado de epistaxe e '
+                                  'edema.'},
+                  {'title': 'Hematoma Septal Associado',
+                   'description': 'Acúmulo sanguíneo subpericondral que exige drenagem imediata para evitar necrose '
+                                  'cartilaginosa.'}]},
+ {'name': 'Osso Lacrimal',
+  'scientific_name': 'Os lacrimale',
+  'region': 'Crânio',
+  'skeleton_division': 'AXIAL',
+  'model_url': '/models/lacrimal_bone__hueso_lacrimal.glb',
+  'description': 'O menor e mais frágil osso da face, localizado na porção anterior da parede medial da órbita.',
+  'clinical_summary': 'Abriga a fossa do saco lacrimal, que drena as lágrimas para o meato nasal inferior através do '
+                      'ducto lacrimonasal.',
+  'landmarks': [{'order': 1,
+                 'name': 'Crista Lacrimal Posterior',
+                 'description': 'Relevo vertical que delimita posteriormente a fossa do saco lacrimal e fixa a parte '
+                                'lacrimal do orbicular do olho.',
+                 'pos': [0.05, 0.25, 0.35]},
+                {'order': 2,
+                 'name': 'Sulco Lacrimal (Fossa do Saco Lacrimal)',
+                 'description': 'Depressão longitudinal anterior que aloja o saco lacrimal.',
+                 'pos': [-0.1, -0.1, 0.45]},
+                {'order': 3,
+                 'name': 'Hâmulo Lacrimal',
+                 'description': 'Pequena projeção inferior em forma de gancho que contorna o início do canal '
+                                'lacrimonasal.',
+                 'pos': [0.0, -0.65, 0.35]},
+                {'order': 4,
+                 'name': 'Face Orbital do Osso Lacrimal',
+                 'description': 'Lâmina lisa posterior que se articula com a lâmina orbital do osso etmoide.',
+                 'pos': [0.2, 0.45, 0.1]}],
+  'pathologies': [{'title': 'Dacriocistite Aguda e Crônica',
+                   'description': 'Infecção do saco lacrimal secundária à obstrução do ducto lacrimonasal.'},
+                  {'title': 'Fratura Naso-Órbito-Etmoidal (NOE)',
+                   'description': 'Trauma complexo da parede medial da órbita afetando o tendão cantal medial e as '
+                                  'vias lacrimais.'}]},
+ {'name': 'Vômer',
+  'scientific_name': 'Vomer',
+  'region': 'Crânio',
+  'skeleton_division': 'AXIAL',
+  'model_url': '/models/vomer_bone__hueso_vomer.glb',
+  'description': 'Osso ímpar, laminar e trapezoidal que forma a porção posteroinferior do septo nasal ósseo.',
+  'clinical_summary': 'Desvios acentuados do septo ósseo envolvendo o vômer podem causar obstrução respiratória nasal '
+                      'crônica.',
+  'landmarks': [{'order': 1,
+                 'name': 'Asas do Vômer',
+                 'description': 'Duas projeções superiores evertidas que se articulam com o rostro do osso esfenoide '
+                                '(esquindilese).',
+                 'pos': [0.0, 0.75, -0.25]},
+                {'order': 2,
+                 'name': 'Sulco Vomeriano (Nasopalatino)',
+                 'description': 'Sulco oblíquo nas faces laterais por onde caminham o nervo e os vasos nasopalatinos.',
+                 'pos': [0.1, 0.15, 0.15]},
+                {'order': 3,
+                 'name': 'Borda Posterior Livre (Divisão das Coanas)',
+                 'description': 'Margem inclinada lisa que separa as aberturas nasais posteriores direita e esquerda.',
+                 'pos': [0.0, -0.25, -0.45]},
+                {'order': 4,
+                 'name': 'Borda Inferior (Articulação Palatina e Maxilar)',
+                 'description': 'Articula-se com a crista nasal da maxila e do osso palatino no assoalho nasal.',
+                 'pos': [0.0, -0.7, 0.25]}],
+  'pathologies': [{'title': 'Desvio de Septo Nasal Ósseo e Esporão Vomeriano',
+                   'description': 'Assimetria osteocartilaginosa capaz de comprometer a ventilação nasal e a drenagem '
+                                  'sinusal.'}]},
+ {'name': 'Osso Hioide',
+  'scientific_name': 'Os hyoideum',
+  'region': 'Crânio',
+  'skeleton_division': 'AXIAL',
+  'model_url': '/models/human_hyoid.glb',
+  'description': 'Osso ímpar em forma de ferradura (U) situado na região cervical anterior, suspenso por músculos e '
+                 'ligamentos sem articular-se diretamente com outros ossos.',
+  'clinical_summary': 'Fundamental para a deglutição e sustentação da via aérea; sua fratura tem grande importância '
+                      'pericial na medicina legal.',
+  'landmarks': [{'order': 1,
+                 'name': 'Corpo do Hioide (Face Anterior)',
+                 'description': 'Porção mediana quadrangular para inserção dos músculos supra-hióideos e '
+                                'infra-hióideos.',
+                 'pos': [0.0, -0.65, 0.35]},
+                {'order': 2,
+                 'name': 'Borda Superior do Corpo e Membrana Tireo-hióidea',
+                 'description': 'Margem conectada à cartilagem tireoide e à epiglote.',
+                 'pos': [0.0, -0.5, 0.1]},
+                {'order': 3,
+                 'name': 'Corno Maior Direito',
+                 'description': 'Projeção posterolateral longa que serve de fixação ao músculo hioglosso e constritor '
+                                'médio da faringe.',
+                 'pos': [0.85, 0.45, -0.15]},
+                {'order': 4,
+                 'name': 'Corno Maior Esquerdo',
+                 'description': 'Extremidade lateral oposta terminando em um tubérculo fibroso.',
+                 'pos': [-0.85, 0.45, -0.15]},
+                {'order': 5,
+                 'name': 'Cornos Menores',
+                 'description': 'Pequenas eminências cônicas superiores onde se prende o ligamento estilohióideo.',
+                 'pos': [0.45, -0.35, 0.25]}],
+  'pathologies': [{'title': 'Síndrome de Eagle (Processo Estiloide / Ligamento Estilohióideo Calcificado)',
+                   'description': 'Dor orofaríngea e cervical desencadeada pela deglutição ou rotação da cabeça.'},
+                  {'title': 'Fratura Traumática do Hioide',
+                   'description': 'Lesão cervical anterior associada a trauma direto ou compressão mecânica do '
+                                  'pescoço.'}]},
+ {'name': 'Vértebra Cervical (Atlas C1)',
+  'scientific_name': 'Atlas (Vertebra cervicalis I)',
+  'region': 'Coluna Vertebral',
+  'skeleton_division': 'AXIAL',
+  'model_url': '/models/human_atlas_c1_vertebra.glb',
+  'description': 'Primeira vértebra cervical, atípica por não possuir corpo vertebral nem processo espinhoso, '
+                 'sustentando diretamente o osso occipital.',
+  'clinical_summary': 'Compressões axiais no topo da cabeça podem causar a clássica Fratura de Jefferson nos arcos '
+                      'anterior e posterior do Atlas.',
+  'landmarks': [{'order': 1,
+                 'name': 'Arco Anterior e Tubérculo Anterior',
+                 'description': 'Fecha anteriormente o anel de C1 e dá fixação ao ligamento longitudinal anterior.',
+                 'pos': [0.0, 0.0, 0.8]},
+                {'order': 2,
+                 'name': 'Fóvea do Dente',
+                 'description': 'Superfície articular côncava posterior no arco anterior para o processo odontoide do '
+                                'Áxis (C2).',
+                 'pos': [0.0, 0.0, 0.55]},
+                {'order': 3,
+                 'name': 'Massa Lateral e Face Articular Superior',
+                 'description': 'Superfície côncava reniforme que se articula com o côndilo occipital (flexão/extensão '
+                                'da cabeça).',
+                 'pos': [0.45, 0.2, 0.1]},
+                {'order': 4,
+                 'name': 'Processo Transverso e Forame Transversário',
+                 'description': 'Projeção lateral perfurada pela passagem ascendente da artéria vertebral.',
+                 'pos': [0.85, 0.0, 0.0]},
+                {'order': 5,
+                 'name': 'Sulco da Artéria Vertebral',
+                 'description': 'Depressão na margem superior do arco posterior por onde a artéria vertebral contorna '
+                                'a massa lateral.',
+                 'pos': [0.35, 0.15, -0.55]},
+                {'order': 6,
+                 'name': 'Arco Posterior e Tubérculo Posterior',
+                 'description': 'Substitui o processo espinhoso e fixa o músculo reto posterior menor da cabeça.',
+                 'pos': [0.0, 0.0, -0.85]}],
+  'pathologies': [{'title': 'Fratura de Jefferson (Explosão do Anel de C1)',
+                   'description': 'Fratura cominutiva dos arcos anterior e posterior decorrente de sobrecarga axial no '
+                                  'vértice craniano.'},
+                  {'title': 'Instabilidade Atlantoaxial',
+                   'description': 'Frouxidão ou ruptura do ligamento transverso do atlas com risco de compressão '
+                                  'bulhomedular.'}]},
+ {'name': 'Vértebra Cervical (Áxis C2)',
+  'scientific_name': 'Axis (Vertebra cervicalis II)',
+  'region': 'Coluna Vertebral',
+  'skeleton_division': 'AXIAL',
+  'model_url': '/models/human_axis_c2_vertebra.glb',
+  'description': 'Segunda vértebra cervical, caracterizada pelo processo odontoide (dente do Áxis), que atua como pivô '
+                 'para a rotação da cabeça.',
+  'clinical_summary': 'Fraturas da base do dente do Áxis ou dos pedículos (espondilolistese traumática de C2) '
+                      'apresentam alto risco de lesão medular.',
+  'landmarks': [{'order': 1,
+                 'name': 'Dente do Áxis (Processo Odontoide)',
+                 'description': 'Projeção vertical superior que funciona como eixo rotacional para o Atlas.',
+                 'pos': [0.0, 0.75, 0.45]},
+                {'order': 2,
+                 'name': 'Face Articular Anterior do Dente',
+                 'description': 'Articula-se com a fóvea do dente no arco anterior de C1.',
+                 'pos': [0.0, 0.55, 0.6]},
+                {'order': 3,
+                 'name': 'Faces Articulares Superiores',
+                 'description': 'Superfícies laterais amplas que recebem o peso transmitido pelas massas laterais do '
+                                'Atlas.',
+                 'pos': [0.55, 0.25, 0.2]},
+                {'order': 4,
+                 'name': 'Processo Transverso e Forame Transversário',
+                 'description': 'Pequena projeção lateral que protege a artéria vertebral.',
+                 'pos': [0.8, -0.05, 0.1]},
+                {'order': 5,
+                 'name': 'Lâmina do Arco Vertebral',
+                 'description': 'Paredes ósseas posterolaterais espessas que protegem a medula cervical alta.',
+                 'pos': [0.35, -0.15, -0.5]},
+                {'order': 6,
+                 'name': 'Processo Espinhoso Bífido',
+                 'description': 'Projeção posterior robusta e bifurcada na linha mediana.',
+                 'pos': [0.0, -0.25, -0.85]}],
+  'pathologies': [{'title': 'Fratura do Processo Odontoide (Anderson e DAlonzo I, II e III)',
+                   'description': 'A fratura tipo II na base do dente do Áxis é a mais instável e de maior risco de '
+                                  'pseudoartrose.'},
+                  {'title': 'Espondilolistese Traumática do Áxis',
+                   'description': 'Fratura bilateral da pars interarticularis (pedículos) de C2 por hiperextensão '
+                                  'cervical.'}]},
+ {'name': 'Vértebra Cervical Típica (C3-C7)',
+  'scientific_name': 'Vertebrae cervicales (C3-C7)',
+  'region': 'Coluna Vertebral',
+  'skeleton_division': 'AXIAL',
+  'model_url': '/models/fourth_cervical_vertebra.glb',
+  'description': 'Vértebras móveis do pescoço caracterizadas por corpo pequeno, forame vertebral triangular amplo e '
+                 'presença de forames transversários.',
+  'clinical_summary': 'A espondilose e a hérnia discal cervical (especialmente C5-C6 e C6-C7) podem comprimir raízes '
+                      'do plexo braquial.',
+  'landmarks': [{'order': 1,
+                 'name': 'Corpo Vertebral Cervical',
+                 'description': 'Porção anterior baixa e quadrangular que sustenta o disco intervertebral.',
+                 'pos': [0.0, 0.0, 0.68]},
+                {'order': 2,
+                 'name': 'Processos Uncinados (Unco do Corpo)',
+                 'description': 'Elevações laterais da margem superior do corpo vertebral (articulações uncovertebrais '
+                                'de Luschka).',
+                 'pos': [0.4, 0.15, 0.55]},
+                {'order': 3,
+                 'name': 'Forame Transversário e Sulco do Nervo Espinal',
+                 'description': 'Canal lateral exclusivo das vértebras cervicais para a artéria e veias vertebrais.',
+                 'pos': [0.85, 0.0, 0.2]},
+                {'order': 4,
+                 'name': 'Processos Articulares Superior e Inferior (Facetas)',
+                 'description': 'Facetas inclinadas a 45° que permitem ampla flexão, extensão e rotação cervical.',
+                 'pos': [0.55, 0.1, -0.2]},
+                {'order': 5,
+                 'name': 'Lâmina e Forame Vertebral Triangular',
+                 'description': 'Delimita o amplo canal vertebral que acomoda a intumescência cervical da medula.',
+                 'pos': [0.25, 0.0, -0.45]},
+                {'order': 6,
+                 'name': 'Processo Espinhoso Bífido',
+                 'description': 'Projeção posterior bifurcada típica de C3 a C6.',
+                 'pos': [0.0, -0.1, -0.8]}],
+  'pathologies': [{'title': 'Radiculopatia e Hérnia Discal Cervical (Cervicobraquialgia)',
+                   'description': 'Compressão de raízes do plexo braquial causando dor irradiada, parestesia e '
+                                  'fraqueza no membro superior.'},
+                  {'title': 'Mielopatia Espondilótica Cervical',
+                   'description': 'Estreitamento degenerativo do canal vertebral cervical com sinais de neurônio motor '
+                                  'superior.'}]},
+ {'name': 'Vértebra Torácica (T1-T12)',
+  'scientific_name': 'Vertebrae thoracicae',
+  'region': 'Coluna Vertebral',
+  'skeleton_division': 'AXIAL',
+  'model_url': '/models/vertebra_toraxica__thoracic_vertebrae.glb',
+  'description': 'Doze vértebras que compõem o segmento torácico da coluna, apresentando fóveas costais para '
+                 'articulação com as costelas.',
+  'clinical_summary': 'Região mais comum de fraturas por compressão vertebral osteoporótica e deformidades como '
+                      'hipercifose e escoliose.',
+  'landmarks': [{'order': 1,
+                 'name': 'Corpo Vertebral Cordiforme',
+                 'description': 'Corpo em forma de coração que aumenta progressivamente de T1 a T12.',
+                 'pos': [0.0, 0.15, 0.68]},
+                {'order': 2,
+                 'name': 'Fóveas Costais Superior e Inferior',
+                 'description': 'Hemifacetas posterolaterais no corpo vertebral para articulação com a cabeça das '
+                                'costelas.',
+                 'pos': [0.45, 0.2, 0.35]},
+                {'order': 3,
+                 'name': 'Pedículo e Forame Vertebral Circular',
+                 'description': 'Conecta o corpo ao arco neural em torno do canal medular torácico.',
+                 'pos': [0.35, 0.1, 0.0]},
+                {'order': 4,
+                 'name': 'Processo Transverso com Fóvea Costal Transversária',
+                 'description': 'Projeção posterolateral que se articula com o tubérculo da costela correspondente.',
+                 'pos': [0.85, 0.15, -0.15]},
+                {'order': 5,
+                 'name': 'Processos Articulares Superiores (Plano Frontal)',
+                 'description': 'Facetas orientadas coronalmente que favorecem a rotação axial e limitam a flexão.',
+                 'pos': [0.35, 0.45, -0.25]},
+                {'order': 6,
+                 'name': 'Processo Espinhoso Longo e Inclinado',
+                 'description': 'Projeta-se posteroinferiormente sobrepondo-se ao nível vertebral subjacente.',
+                 'pos': [0.0, -0.68, -0.75]}],
+  'pathologies': [{'title': 'Escoliose Torácica Idiopática e Hipercifose de Scheuermann',
+                   'description': 'Desvio tridimensional da coluna com gibosidade costal ou acunhamento vertebral '
+                                  'anterior.'},
+                  {'title': 'Fratura Vertebral por Compressão Osteoporótica',
+                   'description': 'Colapso anterior do corpo vertebral torácico em pacientes com baixa densidade '
+                                  'mineral óssea.'}]},
+ {'name': 'Vértebra Lombar (L1-L5)',
+  'scientific_name': 'Vertebrae lumbales',
+  'region': 'Coluna Vertebral',
+  'skeleton_division': 'AXIAL',
+  'model_url': '/models/vertebra_lumbar__lumbar_vertebrae.glb',
+  'description': 'Cinco vértebras volumosas e robustas na região inferior do dorso, adaptadas para suportar grande '
+                 'parte do peso corporal.',
+  'clinical_summary': 'Os níveis L4-L5 e L5-S1 concentram mais de 90% das hérnias de disco lombares causadoras de '
+                      'lombociatalgia.',
+  'landmarks': [{'order': 1,
+                 'name': 'Corpo Vertebral Reniforme (Maciço)',
+                 'description': 'Corpo largo em forma de rim, sem fóveas costais nem forames transversários.',
+                 'pos': [0.0, 0.4, 0.35]},
+                {'order': 2,
+                 'name': 'Pedículo Vertebral Robusto',
+                 'description': 'Cilindro ósseo espesso utilizado como ponto de ancoragem para parafusos pediculares '
+                                'em artrodese.',
+                 'pos': [0.45, 0.1, 0.1]},
+                {'order': 3,
+                 'name': 'Processo Costiforme (Transverso)',
+                 'description': 'Projeção lateral longa para inserção dos músculos quadrado lombar e psoas maior.',
+                 'pos': [0.95, -0.1, 0.0]},
+                {'order': 4,
+                 'name': 'Processo Articular Superior e Processo Mamilar',
+                 'description': 'Facetas orientadas no plano sagital que privilegiam a flexão e extensão da coluna '
+                                'lombar.',
+                 'pos': [0.45, -0.2, 0.25]},
+                {'order': 5,
+                 'name': 'Lâmina Vertebral e Pars Interarticularis',
+                 'description': 'Região posterior entre as facetas superior e inferior, sede de espondilólise.',
+                 'pos': [0.3, -0.45, -0.15]},
+                {'order': 6,
+                 'name': 'Processo Espinhoso Quadrangular',
+                 'description': 'Lâmina posterior espessa, curta e horizontal em forma de machadinha.',
+                 'pos': [0.0, -0.78, -0.35]}],
+  'pathologies': [{'title': 'Hérnia de Disco Lombar e Lombociatalgia',
+                   'description': 'Extrusão posterolateral do núcleo pulposo comprimindo as raízes L4, L5 ou S1 do '
+                                  'nervo isquiático.'},
+                  {'title': 'Espondilólise e Espondilolistese Lombar',
+                   'description': 'Fratura de estresse na pars interarticularis com escorregamento anterior de uma '
+                                  'vértebra sobre a outra.'}]},
+ {'name': 'Sacro e Cóccix',
+  'scientific_name': 'Os sacrum et Os coccygis',
+  'region': 'Coluna Vertebral',
+  'skeleton_division': 'AXIAL',
+  'model_url': '/models/human_sacrum.glb',
+  'description': 'Osso triangular formado pela fusão das 5 vértebras sacrais (S1-S5), transmitindo o peso da coluna '
+                 'vertebral para o cíngulo do membro inferior.',
+  'clinical_summary': 'O promontório sacral é um marco obstétrico e cirúrgico fundamental; o hiato sacral é utilizado '
+                      'para anestesia peridural caudal.',
+  'landmarks': [{'order': 1,
+                 'name': 'Promontório Sacral (Base do Sacro)',
+                 'description': 'Borda anterossuperior proeminente do corpo da 1ª vértebra sacral (S1).',
+                 'pos': [0.0, 0.85, 0.45]},
+                {'order': 2,
+                 'name': 'Asa do Sacro',
+                 'description': 'Expansão triangular lateral à base sacral, cruzada pelo tronco lombossacral.',
+                 'pos': [0.65, 0.7, 0.25]},
+                {'order': 3,
+                 'name': 'Processo Articular Superior de S1',
+                 'description': 'Articula-se com a vértebra L5 na transição lombossacral.',
+                 'pos': [0.35, 0.9, 0.0]},
+                {'order': 4,
+                 'name': 'Face Auricular (Articulação Sacroilíaca)',
+                 'description': 'Superfície lateral em forma de orelha que se articula com o ílio.',
+                 'pos': [0.88, 0.4, 0.1]},
+                {'order': 5,
+                 'name': 'Forames Sacrais Anteriores (Pélvicos)',
+                 'description': 'Quatro pares de aberturas para emergência dos ramos anteriores dos nervos espinais '
+                                'S1-S4.',
+                 'pos': [0.4, -0.05, 0.25]},
+                {'order': 6,
+                 'name': 'Crista Sacral Mediana',
+                 'description': 'Relevo longitudinal posterior formado pela fusão dos processos espinhosos sacrais.',
+                 'pos': [0.0, 0.15, -0.25]},
+                {'order': 7,
+                 'name': 'Hiato Sacral e Ápice do Sacro',
+                 'description': 'Abertura caudal do canal sacral e extremidade inferior que se articula com o cóccix.',
+                 'pos': [0.0, -0.95, -0.2]}],
+  'pathologies': [{'title': 'Sacroileíte e Espondilite Anquilosante',
+                   'description': 'Inflamação crônica das articulações sacroilíacas causando lombalgia inflamatória e '
+                                  'rigidez matinal.'},
+                  {'title': 'Síndrome da Cauda Equina e Coccigodínia',
+                   'description': 'Compressão nervosa aguda das raízes sacrais com anestesia em sela e retenção '
+                                  'urinária.'}]},
+ {'name': 'Esterno',
+  'scientific_name': 'Sternum',
+  'region': 'Caixa Torácica',
+  'skeleton_division': 'AXIAL',
+  'model_url': '/models/sternum.glb',
+  'description': 'Osso plano e alongado localizado na linha mediana anterior do tórax, dividido em manúbrio, corpo e '
+                 'processo xifoide.',
+  'clinical_summary': 'O ângulo esternal (de Louis) marca a altura da 2ª cartilagem costal, referência clínica '
+                      'essencial para contagem de espaços intercostais.',
+  'landmarks': [{'order': 1,
+                 'name': 'Incisura Jugular (Fúrcula Supraesternal)',
+                 'description': 'Depressão superior palpável na borda cranial do manúbrio, ao nível de T2-T3.',
+                 'pos': [0.0, 0.35, -0.95]},
+                {'order': 2,
+                 'name': 'Incisura Clavicular',
+                 'description': 'Superfície articular superolateral para a extremidade esternal da clavícula.',
+                 'pos': [0.28, 0.32, -0.88]},
+                {'order': 3,
+                 'name': 'Manúbrio do Esterno',
+                 'description': 'Porção superior larga e espessa que recebe a 1ª cartilagem costal.',
+                 'pos': [0.0, 0.28, -0.68]},
+                {'order': 4,
+                 'name': 'Ângulo Esternal (Ângulo de Louis)',
+                 'description': 'Sínfise manubrioesternal ao nível da 2ª costela e do disco T4-T5 (bifurcação '
+                                'traqueal).',
+                 'pos': [0.0, 0.22, -0.42]},
+                {'order': 5,
+                 'name': 'Corpo do Esterno e Incisuras Costais',
+                 'description': 'Porção longa central que recebe as cartilagens costais da 2ª à 7ª costela.',
+                 'pos': [0.0, 0.08, 0.2]},
+                {'order': 6,
+                 'name': 'Processo Xifoide',
+                 'description': 'Extremidade caudal cartilaginosa/óssea no epigástrio, marco para massagem cardíaca '
+                                '(RCP).',
+                 'pos': [0.0, -0.18, 0.95]}],
+  'pathologies': [{'title': 'Fratura Esternal e Contusão Miocárdica',
+                   'description': 'Associada a traumas torácicos diretos contra o volante; requer investigação '
+                                  'cardíaca por ECG e troponina.'},
+                  {'title': 'Pectus Excavatum e Pectus Carinatum',
+                   'description': 'Deformidades congênitas da parede torácica anterior por crescimento anômalo das '
+                                  'cartilagens costais.'}]},
+ {'name': 'Costelas e Caixa Torácica (1ª à 12ª Costela)',
+  'scientific_name': 'Costae (I-XII)',
+  'region': 'Caixa Torácica',
+  'skeleton_division': 'AXIAL',
+  'model_url': '/models/human_thorax.glb',
+  'description': 'Conjunto de 12 pares de ossos planos e curvos (24 costelas) que protegem o coração, os pulmões e os '
+                 'grandes vasos mediastinais.',
+  'clinical_summary': 'Fraturas de múltiplos arcos costais consecutivos podem gerar o "tórax instável" (flail chest), '
+                      'com respiração paradoxal.',
+  'landmarks': [{'order': 1,
+                 'name': 'Abertura Torácica Superior e 1ª Costela',
+                 'description': 'Primeira costela curta, larga e achatada, cruzada pelos vasos subclávios e plexo '
+                                'braquial.',
+                 'pos': [0.45, 0.85, 0.15]},
+                {'order': 2,
+                 'name': 'Manúbrio e Corpo do Esterno (Linha Mediana)',
+                 'description': 'Plastrão esternal anterior onde se fixam as cartilagens costais.',
+                 'pos': [0.0, 0.35, 0.65]},
+                {'order': 3,
+                 'name': 'Costelas Verdadeiras / Vertebroesternais (1ª à 7ª)',
+                 'description': 'Unem-se diretamente ao esterno por meio de suas próprias cartilagens costais.',
+                 'pos': [0.75, 0.45, 0.45]},
+                {'order': 4,
+                 'name': 'Costelas Falsas / Vertebrocondrais (8ª à 10ª)',
+                 'description': 'Suas cartilagens unem-se à cartilagem costal superior, formando o arco costal.',
+                 'pos': [0.85, -0.25, 0.5]},
+                {'order': 5,
+                 'name': 'Rebordo Costal (Arco Costal Inferior)',
+                 'description': 'Margem anteroinferior palpável que protege o fígado à direita e o baço à esquerda.',
+                 'pos': [0.55, -0.45, 0.55]},
+                {'order': 6,
+                 'name': 'Costelas Flutuantes / Vertebrais Livres (11ª e 12ª)',
+                 'description': 'Costelas curtas sem conexão anterior com o esterno, terminando na musculatura '
+                                'abdominal posterior.',
+                 'pos': [0.7, -0.75, -0.35]},
+                {'order': 7,
+                 'name': 'Sulco Costal e Espaço Intercostal',
+                 'description': 'Borda inferior interna que abriga a veia, a artéria e o nervo intercostal (VAN).',
+                 'pos': [-0.8, 0.15, 0.35]},
+                {'order': 8,
+                 'name': 'Cabeça, Colo e Tubérculo da Costela (Articulação Costovertebral)',
+                 'description': 'Extremidade posterior que se articula com os corpos e processos transversos das '
+                                'vértebras torácicas.',
+                 'pos': [0.25, 0.2, -0.65]},
+                {'order': 9,
+                 'name': 'Abertura Torácica Inferior',
+                 'description': 'Ampla base torácica fechada pelo músculo diafragma.',
+                 'pos': [0.0, -0.65, -0.2]}],
+  'pathologies': [{'title': 'Tórax Instável (Flail Chest), Pneumotórax e Hemotórax',
+                   'description': 'Fratura de 3 ou mais costelas adjacentes em 2 ou mais pontos, gerando movimento '
+                                  'paradoxal da parede torácica.'},
+                  {'title': 'Síndrome do Desfiladeiro Torácico',
+                   'description': 'Compressão do plexo braquial ou vasos subclávios ao nível da 1ª costela ou costela '
+                                  'cervical.'}]},
+ {'name': 'Clavícula',
+  'scientific_name': 'Clavicula',
+  'region': 'Membros Superiores',
+  'skeleton_division': 'APENDICULAR',
+  'model_url': '/models/left_and_right_clavicles_18yo_male.glb',
+  'description': 'Osso longo em dupla curvatura (forma de S) que conecta o membro superior ao tronco através das '
+                 'articulações esternoclavicular e acromioclavicular.',
+  'clinical_summary': 'É um dos ossos mais fraturados do corpo humano, especialmente na transição entre o terço médio '
+                      'e o terço lateral.',
+  'landmarks': [{'order': 1,
+                 'name': 'Extremidade Esternal (Medial)',
+                 'description': 'Extremidade mais volumosa e triangular que se articula com o manúbrio do esterno.',
+                 'pos': [-0.35, 0.15, 0.15]},
+                {'order': 2,
+                 'name': 'Impressão do Ligamento Costoclavicular',
+                 'description': 'Área rugosa inferomedial que fixa a clavícula à 1ª cartilagem costal.',
+                 'pos': [-0.48, 0.1, 0.12]},
+                {'order': 3,
+                 'name': 'Corpo (Diáfise) da Clavícula e Sulco do Subclávio',
+                 'description': 'Terço médio curvado, desprovido de cavidade medular e ponto mais vulnerável a '
+                                'fraturas.',
+                 'pos': [-0.72, 0.25, 0.1]},
+                {'order': 4,
+                 'name': 'Tubérculo Conoide e Linha Trapezoide',
+                 'description': 'Relevos inferolaterais para inserção dos fortes ligamentos coracoclaviculares.',
+                 'pos': [-0.95, 0.18, -0.05]},
+                {'order': 5,
+                 'name': 'Extremidade Acromial (Lateral)',
+                 'description': 'Extremidade achatada que se articula com o acrômio da escápula.',
+                 'pos': [-1.15, 0.1, -0.12]}],
+  'pathologies': [{'title': 'Fratura do Terço Médio da Clavícula',
+                   'description': 'Comum em quedas sobre o ombro; o fragmento medial é tracionado superiormente pelo '
+                                  'músculo esternocleidomastóideo.'},
+                  {'title': 'Luxação Acromioclavicular (Classificação de Rockwood)',
+                   'description': 'Ruptura dos ligamentos acromioclaviculares e coracoclaviculares com "sinal da tecla '
+                                  'de piano".'}]},
+ {'name': 'Escápula',
+  'scientific_name': 'Scapula',
+  'region': 'Membros Superiores',
+  'skeleton_division': 'APENDICULAR',
+  'model_url': '/models/human_scapula.glb',
+  'description': 'Osso plano e triangular da cintura escapular, fundamental para a biomecânica da articulação '
+                 'glenoumeral.',
+  'clinical_summary': 'A cavidade glenoide rasa proporciona grande amplitude de movimento ao ombro, porém aumenta a '
+                      'suscetibilidade a luxações.',
+  'landmarks': [{'order': 1,
+                 'name': 'Espinha da Escápula',
+                 'description': 'Crista óssea transversal na face posterior que divide as fossas supraespinal e '
+                                'infraespinal.',
+                 'pos': [0.1, 0.2, 0.45]},
+                {'order': 2,
+                 'name': 'Acrômio',
+                 'description': 'Extremidade lateral expandida da espinha da escápula que forma o teto ósseo do ombro.',
+                 'pos': [0.65, 0.35, 0.65]},
+                {'order': 3,
+                 'name': 'Processo Coracoide',
+                 'description': 'Projeção anterior em forma de gancho para inserção dos músculos peitoral menor, '
+                                'coracobraquial e cabeça curta do bíceps.',
+                 'pos': [0.45, 0.25, 0.55]},
+                {'order': 4,
+                 'name': 'Cavidade Glenoide e Tubérculos Supraglenoidal/Infraglenoidal',
+                 'description': 'Superfície articular piriforme lateral que recebe a cabeça do úmero.',
+                 'pos': [0.6, 0.1, 0.45]},
+                {'order': 5,
+                 'name': 'Fossa Supraespinal',
+                 'description': 'Concavidade posterossuperior acima da espinha, local de origem do músculo '
+                                'supraespinal.',
+                 'pos': [0.15, 0.4, 0.55]},
+                {'order': 6,
+                 'name': 'Fossa Infraespinal',
+                 'description': 'Ampla superfície posterior abaixo da espinha ocupada pelo músculo infraespinal.',
+                 'pos': [0.05, -0.1, 0.15]},
+                {'order': 7,
+                 'name': 'Fossa Subescapular (Face Costal)',
+                 'description': 'Face anterior côncava voltada para o gradil costal, origem do músculo subescapular.',
+                 'pos': [0.2, 0.0, 0.25]},
+                {'order': 8,
+                 'name': 'Ângulo Inferior e Margem Medial (Vertebral)',
+                 'description': 'Extremidade caudal espessa que desliza sobre o tórax durante a abdução do braço '
+                                '(ritmo escapuloumeral).',
+                 'pos': [-0.35, -0.45, -0.45]}],
+  'pathologies': [{'title': 'Síndrome do Impacto Subacromial e Lesão do Manguito Rotador',
+                   'description': 'Compressão do tendão do músculo supraespinal e da bursa subacromial sob o arco '
+                                  'coracoacromial.'},
+                  {'title': 'Escápula Alada (Lesão do Nervo Torácico Longo)',
+                   'description': 'Paralisia do músculo serrátil anterior fazendo a margem medial da escápula '
+                                  'projetar-se posteriormente.'}]},
+ {'name': 'Úmero',
+  'scientific_name': 'Humerus',
+  'region': 'Membros Superiores',
+  'skeleton_division': 'APENDICULAR',
+  'model_url': '/models/left_humerus.glb',
+  'description': 'O maior osso do membro superior (braço), articulando-se proximalmente com a escápula no ombro e '
+                 'distalmente com o rádio e a ulna no cotovelo.',
+  'clinical_summary': 'Fraturas do colo cirúrgico podem lesar o nervo axilar; fraturas da diáfise no sulco do nervo '
+                      'radial podem causar "mão caída".',
+  'landmarks': [{'order': 1,
+                 'name': 'Cabeça do Úmero',
+                 'description': 'Superfície semiesférica lisa que se articula com a cavidade glenoide da escápula.',
+                 'pos': [0.12, 0.05, 1.08]},
+                {'order': 2,
+                 'name': 'Colo Anatômico e Colo Cirúrgico',
+                 'description': 'Estreitamento distal aos tubérculos, frequentemente acometido por fraturas e '
+                                'contornado pelo nervo axilar.',
+                 'pos': [0.05, 0.0, 0.85]},
+                {'order': 3,
+                 'name': 'Tubérculo Maior',
+                 'description': 'Proeminência lateral proximal para inserção dos músculos supraespinal, infraespinal e '
+                                'redondo menor.',
+                 'pos': [-0.15, 0.08, 1.02]},
+                {'order': 4,
+                 'name': 'Tubérculo Menor e Sulco Intertubercular (Bicipital)',
+                 'description': 'Inserção do músculo subescapular e canal de passagem do tendão da cabeça longa do '
+                                'bíceps.',
+                 'pos': [-0.05, 0.14, 0.95]},
+                {'order': 5,
+                 'name': 'Tuberosidade Deltoidea',
+                 'description': 'Elevação em forma de V na face lateral do terço médio da diáfise para o músculo '
+                                'deltoide.',
+                 'pos': [-0.08, 0.05, 0.25]},
+                {'order': 6,
+                 'name': 'Sulco do Nervo Radial (Face Posterior da Diáfise)',
+                 'description': 'Sulco espiral oblíquo por onde caminham o nervo radial e a artéria braquial profunda.',
+                 'pos': [0.02, -0.08, -0.05]},
+                {'order': 7,
+                 'name': 'Capítulo do Úmero',
+                 'description': 'Proeminência arredondada lateral distal que se articula com a cabeça do rádio.',
+                 'pos': [-0.12, 0.08, -1.08]},
+                {'order': 8,
+                 'name': 'Tróclea do Úmero e Fossa Coronoide',
+                 'description': 'Superfície em forma de carretel medial que se articula com a incisura troclear da '
+                                'ulna.',
+                 'pos': [0.05, 0.05, -1.1]},
+                {'order': 9,
+                 'name': 'Epicôndilos Medial e Lateral e Fossa do Olécrano',
+                 'description': 'Projeções distais de origem dos músculos flexores/pronadores (medial) e '
+                                'extensores/supinadores (lateral).',
+                 'pos': [0.18, -0.05, -1.02]}],
+  'pathologies': [{'title': 'Fratura da Diáfise do Úmero e Paralisia do Nervo Radial ("Mão Caída")',
+                   'description': 'Lesão do nervo radial no canal de torção causando perda da extensão do punho e dos '
+                                  'dedos.'},
+                  {'title': 'Fratura Supracondiliana do Úmero e Epicondilite (Cotovelo de Tenista/Golfista)',
+                   'description': 'Fratura distal clássica em crianças com risco de lesão da artéria braquial e '
+                                  'contratura isquêmica de Volkmann.'}]},
+ {'name': 'Rádio e Ulna (Antebraço)',
+  'scientific_name': 'Radius et Ulna',
+  'region': 'Membros Superiores',
+  'skeleton_division': 'APENDICULAR',
+  'model_url': '/models/human_radius.glb',
+  'description': 'Ossos longos paralelos do antebraço que realizam os movimentos de pronação e supinação através das '
+                 'articulações radioulnares.',
+  'clinical_summary': 'A Fratura de Colles na extremidade distal do rádio é uma das fraturas mais comuns após quedas '
+                      'com a mão estendida.',
+  'landmarks': [{'order': 1,
+                 'name': 'Cabeça do Rádio e Fóvea Articular',
+                 'description': 'Extremidade proximal em forma de disco que se articula com o capítulo do úmero e a '
+                                'incisura radial da ulna.',
+                 'pos': [0.0, 0.05, 1.12]},
+                {'order': 2,
+                 'name': 'Colo do Rádio',
+                 'description': 'Constrição cilíndrica logo abaixo da cabeça do rádio.',
+                 'pos': [0.0, 0.03, 0.92]},
+                {'order': 3,
+                 'name': 'Tuberosidade do Rádio (Bicipital)',
+                 'description': 'Proeminência anteromedial para inserção do tendão distal do músculo bíceps braquial.',
+                 'pos': [0.06, 0.1, 0.72]},
+                {'order': 4,
+                 'name': 'Corpo (Diáfise) e Margem Interóssea',
+                 'description': 'Borda medial cortante onde se fixa a membrana interóssea do antebraço.',
+                 'pos': [0.02, 0.0, 0.0]},
+                {'order': 5,
+                 'name': 'Processo Estiloide do Rádio',
+                 'description': 'Projeção cônica lateral na extremidade distal, palpável na tabaqueira anatômica.',
+                 'pos': [-0.08, -0.05, -1.12]},
+                {'order': 6,
+                 'name': 'Face Articular Carpal e Incisura Ulnar',
+                 'description': 'Superfície distal côncava que se articula com os ossos escafoide e semilunar no '
+                                'punho.',
+                 'pos': [0.06, -0.02, -1.08]}],
+  'pathologies': [{'title': 'Fratura de Colles e Fratura de Smith',
+                   'description': 'Fratura da metáfise distal do rádio com desvio dorsal ("deformidade em dorso de '
+                                  'garfo") ou desvio volar.'},
+                  {'title': 'Pronação Dolorosa (Subluxação da Cabeça do Rádio)',
+                   'description': 'Deslocamento do ligamento anular do rádio após tração longitudinal brusca pelo '
+                                  'antebraço.'}]},
+ {'name': 'Ossos da Mão (Carpo, Metacarpos e Falanges)',
+  'scientific_name': 'Ossa manus (Carpus, Metacarpus, Phalanges)',
+  'region': 'Membros Superiores',
+  'skeleton_division': 'APENDICULAR',
+  'model_url': '/models/bones_of_the_wrist_hand_and_fingers.glb',
+  'description': 'Conjunto de 27 ossos em cada mão (8 ossos do carpo, 5 metacarpos e 14 falanges), totalizando 54 '
+                 'ossos nas duas mãos.',
+  'clinical_summary': 'O osso escafoide é o mais fraturado do carpo e apresenta alto risco de necrose avascular devido '
+                      'à sua irrigação retrógrada.',
+  'landmarks': [{'order': 1,
+                 'name': 'Osso Escafoide (Fileira Proximal Lateral)',
+                 'description': 'Osso carpal em forma de barco no assoalho da tabaqueira anatômica, articulando-se com '
+                                'o rádio.',
+                 'pos': [-0.82, 0.25, 0.12]},
+                {'order': 2,
+                 'name': 'Osso Semilunar (Centro da Fileira Proximal)',
+                 'description': 'Osso em forma de meia-lua situado entre o escafoide e o piramidal.',
+                 'pos': [-0.85, 0.08, 0.1]},
+                {'order': 3,
+                 'name': 'Ossos Piramidal e Pisiforme (Borda Medial do Carpo)',
+                 'description': 'Situados no lado ulnar do punho; o pisiforme é um osso sesamoide no tendão do flexor '
+                                'ulnar do carpo.',
+                 'pos': [-0.8, -0.15, 0.08]},
+                {'order': 4,
+                 'name': 'Ossos Trapézio e Trapezoide',
+                 'description': 'O trapézio forma a articulação carpometacarpal em sela do polegar (opositor).',
+                 'pos': [-0.55, 0.28, 0.12]},
+                {'order': 5,
+                 'name': 'Osso Capitato (Maior Osso do Carpo)',
+                 'description': 'Localizado no centro da fileira distal, articulando-se principalmente com a base do '
+                                '3º metacarpo.',
+                 'pos': [-0.55, 0.05, 0.1]},
+                {'order': 6,
+                 'name': 'Osso Hamato e Hâmulo do Hamato',
+                 'description': 'Osso medial da fileira distal com projeção em gancho que delimita o canal de Guyon '
+                                '(nervo ulnar).',
+                 'pos': [-0.52, -0.18, 0.08]},
+                {'order': 7,
+                 'name': '1º Osso Metacarpal (Polegar)',
+                 'description': 'Mais curto e móvel dos metacarpos, essencial para o movimento de pinça e oposição.',
+                 'pos': [-0.25, 0.42, 0.15]},
+                {'order': 8,
+                 'name': 'Ossos Metacarpais II a V (Base, Corpo e Cabeça)',
+                 'description': 'Sustentam a palma da mão; suas cabeças formam as articulações metacarpofalângicas '
+                                '("nós dos dedos").',
+                 'pos': [-0.05, 0.0, 0.1]},
+                {'order': 9,
+                 'name': 'Falanges Proximais e Falanges Médias',
+                 'description': 'Formam os segmentos iniciais e intermediários dos dedos (o polegar não possui falange '
+                                'média).',
+                 'pos': [0.45, -0.05, 0.06]},
+                {'order': 10,
+                 'name': 'Falanges Distais (Tuberosidade Ungueal)',
+                 'description': 'Extremidades ósseas das pontas dos dedos que sustentam o leito ungueal e a polpa '
+                                'digital.',
+                 'pos': [0.95, -0.12, 0.02]}],
+  'pathologies': [{'title': 'Fratura do Escafoide e Necrose Avascular',
+                   'description': 'Dor à palpação da tabaqueira anatômica após queda sobre a mão espalmada; risco de '
+                                  'osteonecrose do polo proximal.'},
+                  {'title': 'Síndrome do Túnel do Carpo e Fratura do Boxeador (5º Metacarpo)',
+                   'description': 'Compressão do nervo mediano no punho ou fratura do colo do 5º metacarpo por impacto '
+                                  'direto com o punho fechado.'}]},
+ {'name': 'Osso do Quadril (Pelve / Ilíaco)',
+  'scientific_name': 'Os coxae (Ilium, Ischium, Pubis)',
+  'region': 'Membros Inferiores',
+  'skeleton_division': 'APENDICULAR',
+  'model_url': '/models/low_poly_human_pelvis_bone.glb',
+  'description': 'Grande osso plano formado pela fusão do ílio, ísquio e púbis no acetábulo, conectando o esqueleto '
+                 'axial aos membros inferiores.',
+  'clinical_summary': 'Fraturas do anel pélvico em traumas de alta energia possuem alto risco de choque hipovolêmico '
+                      'por lesão do plexo venoso pélvico.',
+  'landmarks': [{'order': 1,
+                 'name': 'Crista Ilíaca',
+                 'description': 'Borda superior arqueada do ílio entre as espinhas ilíacas anterossuperior e '
+                                'posterossuperior (nível de L4).',
+                 'pos': [0.85, 0.72, 0.15]},
+                {'order': 2,
+                 'name': 'Espinha Ilíaca Anterossuperior (EIAS)',
+                 'description': 'Proeminência anterior palpável onde se fixam o ligamento inguinal e o músculo '
+                                'sartório.',
+                 'pos': [0.92, 0.35, 0.45]},
+                {'order': 3,
+                 'name': 'Fossa Ilíaca e Asa do Ílio',
+                 'description': 'Ampla superfície côncava interna que sustenta as vísceras abdominais e origina o '
+                                'músculo ilíaco.',
+                 'pos': [0.7, 0.45, 0.1]},
+                {'order': 4,
+                 'name': 'Acetábulo (Face Semilunar e Fossa do Acetábulo)',
+                 'description': 'Cavidade hemisférica lateral onde ílio, ísquio e púbis se fundem para receber a '
+                                'cabeça do fêmur.',
+                 'pos': [0.68, -0.25, 0.25]},
+                {'order': 5,
+                 'name': 'Forame Obturado',
+                 'description': 'Grande abertura anteroinferior circundada pelo ísquio e púbis, fechada pela membrana '
+                                'obturatória.',
+                 'pos': [0.42, -0.52, 0.28]},
+                {'order': 6,
+                 'name': 'Túber Isquiático',
+                 'description': 'Tuberosidade posteroinferior robusta que suporta o peso do corpo na posição sentada e '
+                                'origina os músculos isquiotibiais.',
+                 'pos': [0.48, -0.75, -0.1]},
+                {'order': 7,
+                 'name': 'Ramo Isquiopúbico e Ramo Superior do Púbis',
+                 'description': 'Barras ósseas que delimitam inferior e superiormente o forame obturado.',
+                 'pos': [0.28, -0.65, 0.3]},
+                {'order': 8,
+                 'name': 'Sínfise Púbica e Tubérculo Púbico',
+                 'description': 'Articulação cartilaginosa mediana anterior entre os corpos dos dois ossos púbicos.',
+                 'pos': [0.0, -0.55, 0.48]},
+                {'order': 9,
+                 'name': 'Incisura Isquiática Maior e Espinha Isquiática',
+                 'description': 'Passagem posterior para o músculo piriforme e para o volumoso nervo isquiático '
+                                '(ciático).',
+                 'pos': [0.55, -0.1, -0.25]}],
+  'pathologies': [{'title': 'Fratura em Livro Aberto do Anel Pélvico',
+                   'description': 'Disjunção traumática da sínfise púbica e das articulações sacroilíacas com risco de '
+                                  'hemorragia retroperitoneal grave.'},
+                  {'title': 'Osteoartrite do Quadril (Coxartrose) e Impacto Femoroacetabular',
+                   'description': 'Degeneração da cartilagem hialina acetabular provocando dor inguinal e limitação da '
+                                  'rotação interna.'}]},
+ {'name': 'Fêmur',
+  'scientific_name': 'Femur',
+  'region': 'Membros Inferiores',
+  'skeleton_division': 'APENDICULAR',
+  'model_url': '/models/human_femur_bone.glb',
+  'description': 'O osso mais longo, volumoso e resistente do corpo humano, transmitindo o peso corporal do osso do '
+                 'quadril para a tíbia.',
+  'clinical_summary': 'Fraturas do colo do fêmur em idosos apresentam alto risco de necrose avascular da cabeça '
+                      'femoral por lesão das artérias circunflexas.',
+  'landmarks': [{'order': 1,
+                 'name': 'Cabeça do Fêmur e Fóvea da Cabeça',
+                 'description': 'Superfície esférica medial que se articula com o acetábulo e recebe o ligamento da '
+                                'cabeça do fêmur.',
+                 'pos': [-0.22, 0.1, 1.12]},
+                {'order': 2,
+                 'name': 'Colo do Fêmur',
+                 'description': 'Segmento piramidal inclinado (~125°) que conecta a cabeça à região trocantérica.',
+                 'pos': [-0.08, 0.05, 0.96]},
+                {'order': 3,
+                 'name': 'Trocanter Maior',
+                 'description': 'Grande proeminência lateral palpável onde se inserem os músculos glúteo médio, glúteo '
+                                'mínimo e piriforme.',
+                 'pos': [0.22, 0.0, 1.02]},
+                {'order': 4,
+                 'name': 'Trocanter Menor',
+                 'description': 'Eminência cônica posteromedial para inserção do potente músculo iliopsoas (principal '
+                                'flexor do quadril).',
+                 'pos': [-0.1, -0.08, 0.78]},
+                {'order': 5,
+                 'name': 'Corpo (Diáfise) do Fêmur',
+                 'description': 'Haste cilíndrica longa com leve arqueamento anterior, envolvida pelo músculo '
+                                'quadríceps femoral.',
+                 'pos': [0.02, 0.06, 0.15]},
+                {'order': 6,
+                 'name': 'Linha Áspera e Tuberosidade Glútea',
+                 'description': 'Crista longitudinal dupla (lábios medial e lateral) na face posterior para inserção '
+                                'dos músculos adutores.',
+                 'pos': [0.0, -0.08, -0.25]},
+                {'order': 7,
+                 'name': 'Côndilo Medial e Epicôndilo Medial',
+                 'description': 'Expansão distal medial com o tubérculo do adutor e fixação do ligamento colateral '
+                                'tibial.',
+                 'pos': [-0.18, -0.05, -1.08]},
+                {'order': 8,
+                 'name': 'Côndilo Lateral e Epicôndilo Lateral',
+                 'description': 'Expansão distal lateral que transmite carga para o platô tibial lateral.',
+                 'pos': [0.18, -0.05, -1.08]},
+                {'order': 9,
+                 'name': 'Face Patelar (Tróclea Femoral) e Fossa Intercondilar',
+                 'description': 'Sulco anterior para deslizamento da patela e escavação posterior onde se fixam os '
+                                'ligamentos cruzados (LCA e LCP).',
+                 'pos': [0.0, 0.08, -1.12]}],
+  'pathologies': [{'title': 'Fratura Intracapsular do Colo do Fêmur e Necrose Avascular',
+                   'description': 'Quedas da própria altura em idosos com osteoporose, apresentando membro inferior '
+                                  'encurtado e em rotação externa.'},
+                  {'title': 'Fratura Transtrocanteriana e Fratura Diafisária do Fêmur',
+                   'description': 'Traumas de alta energia exigindo fixação cirúrgica com haste intramedular bloqueada '
+                                  'ou DHS.'}]},
+ {'name': 'Patela',
+  'scientific_name': 'Patella',
+  'region': 'Membros Inferiores',
+  'skeleton_division': 'APENDICULAR',
+  'model_url': '/models/kneecap_patella_horse.glb',
+  'description': 'O maior osso sesamoide do esqueleto humano, desenvolvido no interior do tendão do músculo quadríceps '
+                 'femoral.',
+  'clinical_summary': 'Aumenta o braço de alavanca do aparelho extensor do joelho em até 30% e protege a face anterior '
+                      'da articulação femorotibial.',
+  'landmarks': [{'order': 1,
+                 'name': 'Base da Patela (Borda Superior)',
+                 'description': 'Borda espessa superior inclinada onde se insere o tendão do músculo quadríceps '
+                                'femoral.',
+                 'pos': [0.0, 0.78, 0.25]},
+                {'order': 2,
+                 'name': 'Ápice da Patela (Polo Inferior)',
+                 'description': 'Extremidade inferior pontiaguda de onde parte o ligamento patelar até a tuberosidade '
+                                'da tíbia.',
+                 'pos': [0.0, -0.88, 0.2]},
+                {'order': 3,
+                 'name': 'Face Anterior Convexa',
+                 'description': 'Superfície subcutânea estriada longitudinalmente e perfurada por forames vasculares.',
+                 'pos': [0.0, 0.05, 0.45]},
+                {'order': 4,
+                 'name': 'Faces Articulares Posteriores (Medial e Lateral)',
+                 'description': 'Superfícies revestidas pela cartilagem hialina mais espessa do corpo, separadas por '
+                                'uma crista vertical.',
+                 'pos': [0.35, 0.0, -0.35]}],
+  'pathologies': [{'title': 'Condromalácia Patelar (Síndrome da Dor Femoropatelar)',
+                   'description': 'Amolecimento e fissuração da cartilagem retropatelar causando dor anterior no '
+                                  'joelho ao subir/descer escadas.'},
+                  {'title': 'Luxação Lateral da Patela e Fratura Transversa',
+                   'description': 'Deslocamento lateral agudo sobre o côndilo femoral lateral com ruptura do ligamento '
+                                  'patelofemoral medial.'}]},
+ {'name': 'Tíbia e Fíbula (Perna)',
+  'scientific_name': 'Tibia et Fibula',
+  'region': 'Membros Inferiores',
+  'skeleton_division': 'APENDICULAR',
+  'model_url': '/models/tibia_and_fibula__tibia_y_perone.glb',
+  'description': 'Ossos longos da perna: a tíbia (medial e robusta) suporta o peso corporal, enquanto a fíbula '
+                 '(lateral e delgada) estabiliza o tornozelo.',
+  'clinical_summary': 'Por ter sua face anteromedial subcutânea ("canela"), a tíbia é o osso longo mais acometido por '
+                      'fraturas expostas.',
+  'landmarks': [{'order': 1,
+                 'name': 'Côndilo Medial da Tíbia (Platô Tibial Medial)',
+                 'description': 'Superfície articular proximal medial que suporta o menisco medial e o côndilo femoral '
+                                'medial.',
+                 'pos': [0.12, 0.1, 1.08]},
+                {'order': 2,
+                 'name': 'Côndilo Lateral da Tíbia e Eminência Intercondilar',
+                 'description': 'Plataforma lateral proximal e tubérculos intercondilares para inserção dos meniscos e '
+                                'ligamentos cruzados.',
+                 'pos': [-0.08, 0.1, 1.08]},
+                {'order': 3,
+                 'name': 'Tuberosidade da Tíbia',
+                 'description': 'Elevação anterior proximal onde se insere o ligamento patelar (mecanismo extensor do '
+                                'joelho).',
+                 'pos': [0.05, 0.18, 0.85]},
+                {'order': 4,
+                 'name': 'Cabeça e Colo da Fíbula',
+                 'description': 'Extremidade proximal lateral contornada pelo nervo fibular comum (vulnerável a '
+                                'compressões).',
+                 'pos': [-0.18, -0.02, 0.92]},
+                {'order': 5,
+                 'name': 'Margem Anterior da Tíbia (Crista da Tíbia / Canela)',
+                 'description': 'Borda subcutânea proeminente ao longo da diáfise tibial.',
+                 'pos': [0.06, 0.12, 0.15]},
+                {'order': 6,
+                 'name': 'Diáfise da Fíbula e Espaço Interósseo',
+                 'description': 'Haste lateral fina para origem dos músculos fibulares longo e curto.',
+                 'pos': [-0.15, -0.02, 0.0]},
+                {'order': 7,
+                 'name': 'Maléolo Medial (Tíbia)',
+                 'description': 'Projeção distal inferomedial robusta que fixa o ligamento deltoide do tornozelo.',
+                 'pos': [0.12, 0.05, -1.08]},
+                {'order': 8,
+                 'name': 'Maléolo Lateral (Fíbula)',
+                 'description': 'Extremidade distal lateral mais baixa e posterior, completando a pinça maleolar '
+                                'tibiofibular.',
+                 'pos': [-0.14, -0.05, -1.12]}],
+  'pathologies': [{'title': 'Fratura Bimaleolar / Trimaleolar do Tornozelo e Fratura Exposta da Tíbia',
+                   'description': 'Lesão instável da pinça maleolar por entorse grave ou trauma direto na perna com '
+                                  'síndrome compartimental.'},
+                  {'title': 'Doença de Osgood-Schlatter e Lesão do Nervo Fibular Comum',
+                   'description': 'Apofisite de tração na tuberosidade da tíbia em adolescentes ou "pé caído" por '
+                                  'trauma no colo da fíbula.'}]},
+ {'name': 'Ossos do Pé (Tarso, Metatarsos e Falanges)',
+  'scientific_name': 'Ossa pedis (Tarsus, Metatarsus, Phalanges)',
+  'region': 'Membros Inferiores',
+  'skeleton_division': 'APENDICULAR',
+  'model_url': '/models/foot_skeletonskin.glb',
+  'description': 'Conjunto de 26 ossos em cada pé (7 ossos do tarso, 5 metatarsos e 14 falanges), totalizando 52 ossos '
+                 'que sustentam os arcos plantares.',
+  'clinical_summary': 'O tálus transmite todo o peso da perna para o pé, enquanto o calcâneo forma o calcanhar e '
+                      'recebe o tendão calcâneo (de Aquiles).',
+  'landmarks': [{'order': 1,
+                 'name': 'Calcâneo e Tuberosidade do Calcâneo (Retropé)',
+                 'description': 'O maior e mais forte osso do pé; apoia o calcanhar no solo e recebe a inserção do '
+                                'tendão calcâneo (de Aquiles).',
+                 'pos': [0.0, -0.92, -0.25]},
+                {'order': 2,
+                 'name': 'Tálus e Tróclea do Tálus',
+                 'description': 'Articula-se superiormente com a tíbia e a fíbula na articulação talocrural, sem '
+                                'possuir inserções musculares.',
+                 'pos': [0.0, -0.68, 0.35]},
+                {'order': 3,
+                 'name': 'Osso Navicular e Tuberosidade do Navicular',
+                 'description': 'Osso em forma de barco no lado medial entre a cabeça do tálus e os três ossos '
+                                'cuneiformes.',
+                 'pos': [-0.18, -0.35, 0.2]},
+                {'order': 4,
+                 'name': 'Osso Cuboide (Borda Lateral do Mediopé)',
+                 'description': 'Articula-se anteriormente com o calcâneo e posteriormente com as bases do 4º e 5º '
+                                'metatarsos.',
+                 'pos': [0.22, -0.32, 0.05]},
+                {'order': 5,
+                 'name': 'Ossos Cuneiformes (Medial, Intermédio e Lateral)',
+                 'description': 'Três ossos em forma de cunha que estruturam o arco transversal do pé.',
+                 'pos': [-0.1, -0.1, 0.22]},
+                {'order': 6,
+                 'name': '1º Osso Metatarsal (Coluna Medial / Hálux)',
+                 'description': 'O mais curto, espesso e resistente dos metatarsos, fundamental no impulso da marcha.',
+                 'pos': [-0.25, 0.32, 0.15]},
+                {'order': 7,
+                 'name': 'Tuberosidade do 5º Metatarso (Borda Lateral)',
+                 'description': 'Proeminência estilóidea lateral na base do 5º metatarso, onde se insere o tendão do '
+                                'fibular curto.',
+                 'pos': [0.35, -0.05, -0.08]},
+                {'order': 8,
+                 'name': 'Corpos e Cabeças dos Metatarsos II, III e IV',
+                 'description': 'Formam o antepé e o arco metatarsal anterior.',
+                 'pos': [0.08, 0.38, 0.1]},
+                {'order': 9,
+                 'name': 'Falanges Proximais do Pé (I ao V)',
+                 'description': 'Articulam-se com as cabeças dos metatarsos nas articulações metatarsofalângicas.',
+                 'pos': [0.0, 0.72, 0.02]},
+                {'order': 10,
+                 'name': 'Falanges Médias e Distais (Hálux ao 5º Dedo)',
+                 'description': 'Segmentos terminais dos dedos do pé (dois no hálux e três do 2º ao 5º dedo).',
+                 'pos': [0.0, 1.02, -0.05]}],
+  'pathologies': [{'title': 'Fascite Plantar, Esporão do Calcâneo e Fratura Intra-Articular do Calcâneo',
+                   'description': 'Inflamação da aponeurose plantar na tuberosidade do calcâneo ou fratura por queda '
+                                  'de grandes alturas sobre os pés.'},
+                  {'title': 'Fratura de Jones (5º Metatarso), Fratura de Marcha e Hálux Valgo (Joanete)',
+                   'description': 'Fratura na transição metafisodiafisária do 5º metatarso ou desvio lateral da 1ª '
+                                  'articulação metatarsofalângica.'}]}]
+
+
+def ensure_default_atlas_seeded():
+    ensure_default_quiz_seeded()
+
+    Bone.objects.filter(name='Vértebra Cervical (C4)').delete()
+
+    all_landmark_names = []
+    for item in DEFAULT_ATLAS_BONES:
+        for lm in item['landmarks']:
+            all_landmark_names.append(lm['name'])
+
+    for item in DEFAULT_ATLAS_BONES:
+        bone, _ = Bone.objects.update_or_create(
+            name=item['name'],
+            defaults={
+                'scientific_name': item['scientific_name'],
+                'region': item['region'],
+                'skeleton_division': item['skeleton_division'],
+                'model_url': item['model_url'],
+                'description': item['description'],
+                'clinical_summary': item['clinical_summary'],
+                'is_active': True,
+            }
+        )
+
+        if bone.landmarks.count() != len(item['landmarks']):
+            bone.landmarks.all().delete()
+            for lm in item['landmarks']:
+                AnatomicalLandmark.objects.create(
+                    bone=bone,
+                    order=lm['order'],
+                    name=lm['name'],
+                    description=lm['description'],
+                    pos_x=lm['pos'][0],
+                    pos_y=lm['pos'][1],
+                    pos_z=lm['pos'][2],
+                )
+
+        if bone.pathologies.count() != len(item['pathologies']):
+            bone.pathologies.all().delete()
+            for patho in item['pathologies']:
+                BonePathology.objects.create(
+                    bone=bone,
+                    title=patho['title'],
+                    description=patho['description'],
+                )
+
+        if bone.name != 'Osso Temporal' and bone.questions.count() != len(item['landmarks']):
+            bone.questions.all().delete()
+            own_names = [lm['name'] for lm in item['landmarks']]
+            for idx_lm, lm in enumerate(item['landmarks']):
+                correct = lm['name']
+                distractors = [n for n in own_names if n != correct]
+                if len(distractors) < 3:
+                    for extra in all_landmark_names:
+                        if extra != correct and extra not in distractors:
+                            distractors.append(extra)
+                        if len(distractors) >= 3:
+                            break
+                opts = [correct, distractors[0], distractors[1], distractors[2]]
+                shift = idx_lm % 4
+                opts = opts[shift:] + opts[:shift]
+                QuizQuestion.objects.create(
+                    bone=bone,
+                    correct_answer=correct,
+                    option_a=opts[0],
+                    option_b=opts[1],
+                    option_c=opts[2],
+                    option_d=opts[3],
+                    pos_x=lm['pos'][0],
+                    pos_y=lm['pos'][1],
+                    pos_z=lm['pos'][2],
+                    is_active=True,
+                )
+
+    return Bone.objects.filter(is_active=True).prefetch_related('landmarks', 'pathologies', 'questions')
+
+
+class AtlasBonesView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request):
+        bones = ensure_default_atlas_seeded()
+        result = []
+        for b in bones:
+            landmarks = [
+                {
+                    'id': lm.id,
+                    'order': lm.order,
+                    'name': lm.name,
+                    'description': lm.description,
+                    'pos3D': [lm.pos_x, lm.pos_y, lm.pos_z],
+                }
+                for lm in b.landmarks.all()
+            ]
+            pathologies = [
+                {
+                    'id': p.id,
+                    'title': p.title,
+                    'description': p.description,
+                }
+                for p in b.pathologies.all()
+            ]
+            result.append({
+                'id': b.id,
+                'name': b.name,
+                'scientificName': b.scientific_name,
+                'region': b.region,
+                'skeletonDivision': b.skeleton_division,
+                'modelUrl': b.model_url,
+                'has3DModel': bool(b.model_url and b.model_url.strip()),
+                'description': b.description,
+                'clinicalSummary': b.clinical_summary,
+                'landmarksCount': len(landmarks),
+                'quizQuestionsCount': b.questions.filter(is_active=True).count(),
+                'landmarks': landmarks,
+                'pathologies': pathologies,
+            })
+
+        return Response({'bones': result, 'total': len(result)}, status=status.HTTP_200_OK)
+
+
+class CalibrateLandmarkView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        if not getattr(request.user, 'is_admin', False):
+            return Response(
+                {'error': 'Acesso negado. Apenas administradores podem calibrar coordenadas 3D.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        bone_name = str(request.data.get('bone_name', '')).strip()
+        order = request.data.get('order')
+        landmark_name = str(request.data.get('landmark_name', '')).strip()
+        try:
+            pos_x = round(float(request.data.get('pos_x', 0.0)), 4)
+            pos_y = round(float(request.data.get('pos_y', 0.0)), 4)
+            pos_z = round(float(request.data.get('pos_z', 0.0)), 4)
+        except (TypeError, ValueError):
+            return Response({'error': 'Coordenadas 3D inválidas.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        bone = Bone.objects.filter(name=bone_name).first()
+        if not bone:
+            return Response({'error': 'Osso não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
+
+        landmark = None
+        if order is not None:
+            landmark = AnatomicalLandmark.objects.filter(bone=bone, order=order).first()
+        if not landmark and landmark_name:
+            landmark = AnatomicalLandmark.objects.filter(bone=bone, name=landmark_name).first()
+
+        if not landmark:
+            return Response({'error': 'Acidente anatômico não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
+
+        landmark.pos_x = pos_x
+        landmark.pos_y = pos_y
+        landmark.pos_z = pos_z
+        landmark.save(update_fields=['pos_x', 'pos_y', 'pos_z'])
+
+        QuizQuestion.objects.filter(bone=bone, correct_answer=landmark.name).update(
+            pos_x=pos_x,
+            pos_y=pos_y,
+            pos_z=pos_z,
+        )
+
+        for item in DEFAULT_ATLAS_BONES:
+            if item['name'] == bone.name:
+                for lm_item in item['landmarks']:
+                    if lm_item['order'] == landmark.order or lm_item['name'] == landmark.name:
+                        lm_item['pos'] = [pos_x, pos_y, pos_z]
+
+        return Response(
+            {
+                'message': f'Coordenada 3D de "{landmark.name}" salva com sucesso!',
+                'bone_name': bone.name,
+                'order': landmark.order,
+                'landmark_name': landmark.name,
+                'pos3D': [pos_x, pos_y, pos_z],
+            },
+            status=status.HTTP_200_OK,
+        )

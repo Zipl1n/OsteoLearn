@@ -160,8 +160,10 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onSuccess }) => {
     };
 
     const handleGoogleLogin = () => {
-        window.location.href = 'http://127.0.0.1:8000/api/auth/social/google/login/';
+        const apiUrl = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
+        window.location.href = `${apiUrl}/api/auth/social/google/login/`;
     };
+
     const handleRequestPasswordReset = async (e: React.FormEvent) => {
         e.preventDefault();
         setError(null);

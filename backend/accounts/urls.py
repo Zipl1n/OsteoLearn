@@ -1,19 +1,28 @@
 from django.urls import path
 from rest_framework_simplejwt.views import TokenRefreshView
 from .views import (
-    RegisterView, 
-    LoginView, 
-    TwoFactorVerifyView, 
-    TwoFactorResendView, 
+    RegisterView,
+    LoginView,
+    TwoFactorVerifyView,
+    TwoFactorResendView,
     PasswordResetRequestView,
     PasswordResetConfirmView,
-    LogoutView, 
-    MeView, 
+    LogoutView,
+    MeView,
     LGPDExportDataView,
-    DeleteAccountView
+    LGPDConsentView,
+    DeleteAccountView,
+    AdminAuditLogsView,
+    QuizQuestionsView,
+    AtlasBonesView,
+    CalibrateLandmarkView,
 )
 
 urlpatterns = [
+    path('admin/logs/', AdminAuditLogsView.as_view(), name='admin-audit-logs'),
+    path('quiz/questions/', QuizQuestionsView.as_view(), name='quiz-questions'),
+    path('atlas/bones/', AtlasBonesView.as_view(), name='atlas-bones'),
+    path('atlas/landmarks/calibrate/', CalibrateLandmarkView.as_view(), name='calibrate-landmark'),
     path('register/', RegisterView.as_view(), name='auth_register'),
     path('login/', LoginView.as_view(), name='auth_login'),
     path('2fa/verify/', TwoFactorVerifyView.as_view(), name='auth_2fa_verify'),
@@ -25,4 +34,5 @@ urlpatterns = [
     path('logout/', LogoutView.as_view(), name='auth_logout'),
     path('lgpd/export/', LGPDExportDataView.as_view(), name='lgpd_export'),
     path('me/delete/', DeleteAccountView.as_view(), name='account-delete'),
+    path('lgpd/consent/', LGPDConsentView.as_view(), name='lgpd_consent'),
 ]

@@ -27,7 +27,7 @@ export const PrivacyModal: React.FC<PrivacyModalProps> = ({ isOpen, onClose }) =
                 {/* Conteúdo com scroll */}
                 <div className="p-6 overflow-y-auto space-y-4 text-xs text-slate-600 leading-relaxed">
                     <p className="font-semibold text-slate-800">
-                        Termo de Consentimento para Tratamento de Dados Pessoais (Lei nº 13.709/2018 - LGPD) — Versão 1.0
+                        Termo de Consentimento para Tratamento de Dados Pessoais (Lei nº 13.709/2018 - LGPD) - Versão 1.0
                     </p>
 
                     <div>

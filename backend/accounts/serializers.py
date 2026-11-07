@@ -53,7 +53,7 @@ class RegisterSerializer(serializers.ModelSerializer):
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ('id', 'name', 'email', 'lgpd_consent', 'lgpd_consent_version', 'lgpd_consent_at', 'date_joined')
+        fields = ('id', 'name', 'email', 'role', 'lgpd_consent', 'lgpd_consent_version', 'lgpd_consent_at', 'date_joined')
 
 
 class AuditLogSerializer(serializers.ModelSerializer):

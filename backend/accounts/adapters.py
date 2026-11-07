@@ -1,3 +1,4 @@
+import os
 from allauth.account.adapter import DefaultAccountAdapter
 from allauth.socialaccount.adapter import DefaultSocialAccountAdapter
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -23,7 +24,8 @@ def build_jwt_redirect_url(user, request):
         'token': str(refresh.access_token),
         'refresh': str(refresh),
     })
-    return f"http://localhost:5173/?{query}"
+    frontend_url = os.getenv('FRONTEND_URL', 'http://localhost:5173')
+    return f"{frontend_url}/?{query}"
 
 
 class CustomAccountAdapter(DefaultAccountAdapter):
@@ -75,7 +77,7 @@ class CustomSocialAccountAdapter(DefaultSocialAccountAdapter):
             last = data.get('family_name') or data.get('last_name', '')
             name = f"{first} {last}".strip()
         user.name = name or 'Matheus Henrique'
-        user.lgpd_consent = True
+        user.lgpd_consent = False
         user.lgpd_consent_version = '1.0'
-        user.lgpd_consent_at = timezone.now()
+        user.lgpd_consent_at = None
         return user
