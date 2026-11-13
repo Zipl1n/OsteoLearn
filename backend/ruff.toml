@@ -1,0 +1,11 @@
+target-version = "py312"
+line-length = 140
+exclude = [
+    "venv",
+    "accounts/migrations",
+    "accounts/seed_data.py",
+    "__pycache__",
+]
+
+[lint]
+select = ["E", "F", "W"]
