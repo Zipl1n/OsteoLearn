@@ -28,7 +28,9 @@ class RegisterSerializer(serializers.ModelSerializer):
 
     def validate_lgpd_consent(self, value):
         if not value:
-            raise serializers.ValidationError("É obrigatório concordar com os Termos de Uso e Política de Privacidade (LGPD) para criar a conta.")
+            raise serializers.ValidationError(
+                "É obrigatório concordar com os Termos de Uso e Política de Privacidade (LGPD) para criar a conta."
+            )
         return value
 
     def create(self, validated_data):
@@ -53,7 +55,7 @@ class RegisterSerializer(serializers.ModelSerializer):
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ('id', 'name', 'email', 'lgpd_consent', 'lgpd_consent_version', 'lgpd_consent_at', 'date_joined')
+        fields = ('id', 'name', 'email', 'role', 'lgpd_consent', 'lgpd_consent_version', 'lgpd_consent_at', 'date_joined')
 
 
 class AuditLogSerializer(serializers.ModelSerializer):

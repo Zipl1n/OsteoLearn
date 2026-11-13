@@ -30,7 +30,7 @@ export const TermsModal: React.FC<TermsModalProps> = ({ isOpen, onClose }) => {
                 {/* Conteúdo dos Termos */}
                 <div className="p-6 overflow-y-auto space-y-4 text-xs text-slate-600 leading-relaxed">
                     <p className="font-semibold text-slate-800">
-                        Termos e Condições Gerais de Uso da Plataforma OsteoLearn — Versão 1.0
+                        Termos e Condições Gerais de Uso da Plataforma OsteoLearn - Versão 1.0
                     </p>
 
                     <div>

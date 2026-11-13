@@ -5,6 +5,7 @@ export interface User {
     id: number;
     name: string;
     email: string;
+    role?: 'STUDENT' | 'ADMIN' | string;
     lgpd_consent: boolean;
     lgpd_consent_version: string;
     lgpd_consent_at: string;
@@ -29,6 +30,7 @@ interface AuthContextType {
     logout: () => Promise<void>;
     exportMyData: () => Promise<void>;
     deleteMyAccount: () => Promise<void>;
+    acceptLGPD: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType>({} as AuthContextType);
@@ -44,7 +46,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             const urlRefresh = params.get('refresh');
 
             if (urlToken) {
-                console.log('Token JWT recebido do Google com sucesso!');
                 localStorage.setItem('@OsteoLearn:token', urlToken);
                 if (urlRefresh) localStorage.setItem('@OsteoLearn:refresh', urlRefresh);
                 window.history.replaceState({}, document.title, window.location.pathname);
@@ -53,10 +54,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             if (storedToken) {
                 try {
                     const response = await api.get('auth/me/');
-                    console.log('Usuário logado:', response.data);
                     setUser(response.data);
                 } catch (err) {
-                    console.error('Erro ao validar token com auth/me/:', err);
                     localStorage.removeItem('@OsteoLearn:token');
                     localStorage.removeItem('@OsteoLearn:refresh');
                 }
@@ -93,7 +92,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const response = await api.post('auth/2fa/verify/', { email, code });
         const { access, refresh } = response.data.tokens;
         const userData = response.data.user;
-
         localStorage.setItem('@OsteoLearn:token', access);
         localStorage.setItem('@OsteoLearn:refresh', refresh);
         setUser(userData);
@@ -108,7 +106,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return response.data.message;
     };
 
-
     const confirmPasswordReset = async (email: string, code: string, newPassword: string): Promise<string> => {
         const response = await api.post('auth/password/reset/confirm/', {
             email,
@@ -122,7 +119,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         try {
             await api.post('auth/logout/');
         } catch {
-
         }
         localStorage.removeItem('@OsteoLearn:token');
         localStorage.removeItem('@OsteoLearn:refresh');
@@ -153,6 +149,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
     };
 
+    const acceptLGPD = async () => {
+        const response = await api.post('auth/lgpd/consent/');
+        if (response.data.user) {
+            setUser(response.data.user);
+        }
+    };
+
     return (
         <AuthContext.Provider value={{
             user,
@@ -166,6 +169,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             logout,
             exportMyData,
             deleteMyAccount,
+            acceptLGPD,
         }}>
             {children}
         </AuthContext.Provider>
