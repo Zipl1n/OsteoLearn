@@ -25,181 +25,15 @@ import {
     DEFAULT_ATLAS_BONES_FALLBACK,
     type AtlasBone,
 } from '../Atlas/AtlasCatalogPage';
+import { checkQuizAnswer, getQuizQuestions } from '../../services/api';
 
 interface QuizQuestion {
     id: number;
-    correctAnswer: string;
+    statement?: string;
+    questionType?: 'MULTIPLE_CHOICE' | 'SPATIAL_CLICK';
     options: string[];
     pos3D: [number, number, number];
 }
-
-const FALLBACK_TEMPORAL_QUESTION_POOL: QuizQuestion[] = [
-    {
-        id: 1,
-        correctAnswer: 'Processo Mastóide',
-        options: [
-            'Meato Acústico Interno',
-            'Processo Mastóide',
-            'Processo Estiloide',
-            'Fossa Mandibular',
-        ],
-        pos3D: [-0.12, -1.12, -0.5],
-    },
-    {
-        id: 2,
-        correctAnswer: 'Processo Zigomático',
-        options: [
-            'Processo Zigomático',
-            'Parte Escamosa',
-            'Tubérculo Articular',
-            'Meato Acústico Externo',
-        ],
-        pos3D: [1.5, -0.34, -0.05],
-    },
-    {
-        id: 3,
-        correctAnswer: 'Meato Acústico Interno',
-        options: [
-            'Fossa Jugular',
-            'Canal Carótico',
-            'Meato Acústico Interno',
-            'Meato Acústico Externo',
-        ],
-        pos3D: [-0.68, -0.22, 0.48],
-    },
-    {
-        id: 4,
-        correctAnswer: 'Meato Acústico Externo',
-        options: [
-            'Forame Estilomastóideo',
-            'Meato Acústico Externo',
-            'Fissura Petrotimpânica',
-            'Fossa Mandibular',
-        ],
-        pos3D: [-0.12, -0.5, -0.5],
-    },
-    {
-        id: 5,
-        correctAnswer: 'Fossa Mandibular',
-        options: [
-            'Incisura Mastóidea',
-            'Parte Petrosa',
-            'Processo Zigomático',
-            'Fossa Mandibular',
-        ],
-        pos3D: [-0.15, -0.45, 0.17],
-    },
-    {
-        id: 6,
-        correctAnswer: 'Parte Escamosa',
-        options: [
-            'Parte Escamosa',
-            'Parte Timpânica',
-            'Processo Mastóide',
-            'Ápice Petroso',
-        ],
-        pos3D: [0.25, 0.58, -0.53],
-    },
-    {
-        id: 7,
-        correctAnswer: 'Parte Petrosa (Rochedo)',
-        options: [
-            'Processo Zigomático',
-            'Parte Petrosa (Rochedo)',
-            'Tubérculo Articular',
-            'Eminência Arqueada',
-        ],
-        pos3D: [-0.7, -0.13, 0.45],
-    },
-    {
-        id: 8,
-        correctAnswer: 'Incisura Mastóidea',
-        options: [
-            'Sulco do Seio Sigmoide',
-            'Fossa Mandibular',
-            'Incisura Mastóidea',
-            'Meato Acústico Externo',
-        ],
-        pos3D: [-0.43, -1.04, -0.27],
-    },
-    {
-        id: 9,
-        correctAnswer: 'Tubérculo Articular',
-        options: [
-            'Tubérculo Articular',
-            'Processo Estiloide',
-            'Crista Supramastóidea',
-            'Meato Acústico Interno',
-        ],
-        pos3D: [0.65, -0.57, -0.38],
-    },
-    {
-        id: 10,
-        correctAnswer: 'Sulco da Artéria Temporal Média',
-        options: [
-            'Canal Facial',
-            'Forame Mastóideo',
-            'Fossa Subarqueada',
-            'Sulco da Artéria Temporal Média',
-        ],
-        pos3D: [0.05, 0.37, -0.7],
-    },
-    {
-        id: 11,
-        correctAnswer: 'Ápice Petroso',
-        options: [
-            'Ápice Petroso',
-            'Processo Mastóide',
-            'Tubérculo Articular',
-            'Borda Parietal',
-        ],
-        pos3D: [-1.57, -0.24, -0.95],
-    },
-    {
-        id: 12,
-        correctAnswer: 'Crista Supramastóidea',
-        options: [
-            'Incisura Mastóidea',
-            'Crista Supramastóidea',
-            'Meato Acústico Interno',
-            'Fossa Jugular',
-        ],
-        pos3D: [0.05, -0.23, -0.66],
-    },
-    {
-        id: 13,
-        correctAnswer: 'Borda Parietal',
-        options: [
-            'Borda Parietal',
-            'Processo Estiloide',
-            'Fossa Mandibular',
-            'Meato Acústico Externo',
-        ],
-        pos3D: [0.19, 1.34, -0.26],
-    },
-    {
-        id: 14,
-        correctAnswer: 'Eminência Arqueada',
-        options: [
-            'Processo Zigomático',
-            'Tubérculo Articular',
-            'Eminência Arqueada',
-            'Parte Timpânica',
-        ],
-        pos3D: [-0.53, -0.05, 0.72],
-    },
-    {
-        id: 15,
-        correctAnswer: 'Parte Timpânica',
-        options: [
-            'Parte Escamosa',
-            'Borda Parietal',
-            'Ápice Petroso',
-            'Parte Timpânica',
-        ],
-        pos3D: [-0.03, -0.57, -0.4],
-    },
-];
 
 export function getMaxLivesForLandmarksCount(landmarksCount: number): number {
     if (landmarksCount <= 4) return 1;
@@ -216,33 +50,6 @@ function shuffleArray<T>(items: T[]): T[] {
     return copy;
 }
 
-function buildQuestionPoolForBone(bone: AtlasBone, allBones: AtlasBone[]): QuizQuestion[] {
-    if (bone.name === 'Osso Temporal') {
-        return FALLBACK_TEMPORAL_QUESTION_POOL;
-    }
-
-    const ownNames = bone.landmarks.map((lm) => lm.name);
-    const regionDistractors = allBones
-        .filter((b) => b.region === bone.region && b.name !== bone.name)
-        .flatMap((b) => b.landmarks.map((lm) => lm.name));
-    const globalDistractors = allBones.flatMap((b) => b.landmarks.map((lm) => lm.name));
-
-    return bone.landmarks.map((lm, idx) => {
-        const candidates = shuffleArray(
-            Array.from(new Set([...ownNames, ...regionDistractors, ...globalDistractors])).filter(
-                (n) => n !== lm.name
-            )
-        );
-        const distractors = candidates.slice(0, 3);
-        return {
-            id: lm.id || idx + 1,
-            correctAnswer: lm.name,
-            options: shuffleArray([lm.name, ...distractors]),
-            pos3D: lm.pos3D,
-        };
-    });
-}
-
 function pickRandomQuestions(pool: QuizQuestion[], maxCount = 10): QuizQuestion[] {
     const targetCount = Math.min(maxCount, pool.length);
     const shuffledQuestions = shuffleArray(pool).slice(0, targetCount);
@@ -255,13 +62,22 @@ function pickRandomQuestions(pool: QuizQuestion[], maxCount = 10): QuizQuestion[
 function SinglePinViewer({
     modelUrl,
     pinPosition,
+    isSpatialMode = false,
+    clickedPosition = null,
+    showTargetPin = true,
+    onSpatialClick,
 }: {
     modelUrl: string;
     pinPosition: [number, number, number];
+    isSpatialMode?: boolean;
+    clickedPosition?: [number, number, number] | null;
+    showTargetPin?: boolean;
+    onSpatialClick?: (pos: [number, number, number]) => void;
 }) {
     const safeUrl = modelUrl || '/models/os_temporal_gauche_humain.glb';
     const { scene } = useGLTF(safeUrl);
     const isTemporal = safeUrl.includes('os_temporal_gauche_humain.glb');
+    const rootGroupRef = useRef<THREE.Group | null>(null);
 
     const { clonedScene, normScale, centerOffset, snappedPin } = useMemo(() => {
         const cloned = scene.clone(true);
@@ -322,8 +138,23 @@ function SinglePinViewer({
         };
     }, [scene, isTemporal, pinPosition]);
 
+    const handleSurfaceClick = (e: any) => {
+        if (!isSpatialMode || !onSpatialClick) return;
+        if (typeof e.delta === 'number' && e.delta > 5) return;
+        e.stopPropagation();
+        const hitPoint = e.point.clone();
+        const localPoint = rootGroupRef.current
+            ? rootGroupRef.current.worldToLocal(hitPoint)
+            : hitPoint;
+        onSpatialClick([
+            Number(localPoint.x.toFixed(4)),
+            Number(localPoint.y.toFixed(4)),
+            Number(localPoint.z.toFixed(4)),
+        ]);
+    };
+
     return (
-        <group>
+        <group ref={rootGroupRef}>
             {isTemporal ? (
                 <Center>
                     <primitive
@@ -331,25 +162,42 @@ function SinglePinViewer({
                         scale={1.4}
                         position={[0, -0.2, 0]}
                         rotation={[0, -0.4, 0]}
+                        onClick={handleSurfaceClick}
                     />
                 </Center>
             ) : (
-                <group scale={normScale}>
+                <group scale={normScale} onClick={handleSurfaceClick}>
                     <primitive object={clonedScene} position={centerOffset} />
                 </group>
             )}
 
-            <group position={snappedPin}>
-                <mesh>
-                    <sphereGeometry args={[0.055, 24, 24]} />
-                    <meshStandardMaterial
-                        color="#F59E0B"
-                        emissive="#F59E0B"
-                        emissiveIntensity={0.9}
-                        roughness={0.15}
-                    />
-                </mesh>
-            </group>
+            {showTargetPin && (
+                <group position={snappedPin}>
+                    <mesh>
+                        <sphereGeometry args={[0.055, 24, 24]} />
+                        <meshStandardMaterial
+                            color="#F59E0B"
+                            emissive="#F59E0B"
+                            emissiveIntensity={0.9}
+                            roughness={0.15}
+                        />
+                    </mesh>
+                </group>
+            )}
+
+            {clickedPosition && (
+                <group position={clickedPosition}>
+                    <mesh>
+                        <sphereGeometry args={[0.055, 24, 24]} />
+                        <meshStandardMaterial
+                            color="#38BDF8"
+                            emissive="#0284C7"
+                            emissiveIntensity={0.9}
+                            roughness={0.15}
+                        />
+                    </mesh>
+                </group>
+            )}
         </group>
     );
 }
@@ -357,8 +205,8 @@ function SinglePinViewer({
 interface QuizPageProps {
     bones?: AtlasBone[];
     onExit: () => void;
-    onQuizFinished?: (correctCount: number, totalQuestions: number, quizTitle: string) => void;
-    onQuizProgress?: (currentQuestionNumber: number, totalQuestions: number, quizTitle: string) => void;
+    onQuizFinished?: (correctCount: number, totalQuestions: number, quizTitle: string, boneId?: number) => void;
+    onQuizProgress?: (currentQuestionNumber: number, totalQuestions: number, quizTitle: string, boneId?: number) => void;
 }
 
 const REGION_FILTERS = [
@@ -380,12 +228,19 @@ export const QuizPage: React.FC<QuizPageProps> = ({
     const [regionFilter, setRegionFilter] = useState<string>('Todos');
     const [searchQuery, setSearchQuery] = useState<string>('');
 
-    const [questionPool, setQuestionPool] = useState<QuizQuestion[]>(FALLBACK_TEMPORAL_QUESTION_POOL);
-    const [activeQuestions, setActiveQuestions] = useState<QuizQuestion[]>(() =>
-        pickRandomQuestions(FALLBACK_TEMPORAL_QUESTION_POOL, 10)
-    );
+    const [questionPool, setQuestionPool] = useState<QuizQuestion[]>([]);
+    const [activeQuestions, setActiveQuestions] = useState<QuizQuestion[]>([]);
+    const [loadingQuestions, setLoadingQuestions] = useState(false);
+    const [verifyingAnswer, setVerifyingAnswer] = useState(false);
     const [currentIndex, setCurrentIndex] = useState(0);
     const [selectedOption, setSelectedOption] = useState<string | null>(null);
+    const [clickedPos3D, setClickedPos3D] = useState<[number, number, number] | null>(null);
+    const [verifiedResult, setVerifiedResult] = useState<{
+        isCorrect: boolean;
+        correctAnswer: string;
+        explanation?: string;
+        clinicalCorrelation?: string;
+    } | null>(null);
     const [isConfirmed, setIsConfirmed] = useState(false);
     const [maxLives, setMaxLives] = useState(3);
     const [lives, setLives] = useState(3);
@@ -399,40 +254,44 @@ export const QuizPage: React.FC<QuizPageProps> = ({
     const currentQuestion = activeQuestions[currentIndex] || activeQuestions[0];
     const optionLetters = ['A', 'B', 'C', 'D'];
 
-    const startQuizForBone = (bone: AtlasBone) => {
+    const startQuizForBone = async (bone: AtlasBone) => {
         const computedMaxLives = getMaxLivesForLandmarksCount(bone.landmarks.length);
-        const localPool = buildQuestionPoolForBone(bone, bones);
-        const targetQuestionsCount = bone.name === 'Osso Temporal' ? 10 : Math.min(10, localPool.length);
-
         setQuizBone(bone);
         setMaxLives(computedMaxLives);
         setLives(computedMaxLives);
-        setQuestionPool(localPool);
-        setActiveQuestions(pickRandomQuestions(localPool, targetQuestionsCount));
         setCurrentIndex(0);
         setSelectedOption(null);
+        setClickedPos3D(null);
+        setVerifiedResult(null);
         setIsConfirmed(false);
         setStreak(0);
         setCorrectCount(0);
         setTimeLeft(30);
         setQuizStatus('playing');
+        setLoadingQuestions(true);
 
-        const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/auth';
-        fetch(`${apiUrl}/quiz/questions/?bone_name=${encodeURIComponent(bone.name)}`)
-            .then((res) => (res.ok ? res.json() : null))
-            .then((data) => {
-                if (data && Array.isArray(data.questions) && data.questions.length > 0) {
-                    setQuestionPool(data.questions);
-                    setActiveQuestions(
-                        pickRandomQuestions(data.questions, Math.min(10, data.questions.length))
-                    );
+        try {
+            const data = await getQuizQuestions(bone.name, bone.id);
+            if (data && Array.isArray(data.questions) && data.questions.length > 0) {
+                setQuestionPool(data.questions);
+                setActiveQuestions(
+                    pickRandomQuestions(data.questions, Math.min(10, data.questions.length))
+                );
+                if (data.bone?.maxLives) {
+                    setMaxLives(data.bone.maxLives);
+                    setLives(data.bone.maxLives);
                 }
-            })
-            .catch(() => { });
+            }
+        } catch {
+            setQuestionPool([]);
+            setActiveQuestions([]);
+        } finally {
+            setLoadingQuestions(false);
+        }
     };
 
     useEffect(() => {
-        if (!quizBone || quizStatus !== 'playing' || isConfirmed) return;
+        if (!quizBone || loadingQuestions || activeQuestions.length === 0 || quizStatus !== 'playing' || isConfirmed) return;
 
         if (timeLeft <= 0) {
             handleTimeOut();
@@ -444,27 +303,64 @@ export const QuizPage: React.FC<QuizPageProps> = ({
         }, 1000);
 
         return () => clearInterval(timer);
-    }, [quizBone, timeLeft, quizStatus, isConfirmed]);
+    }, [quizBone, loadingQuestions, activeQuestions.length, timeLeft, quizStatus, isConfirmed]);
 
-    const handleTimeOut = () => {
+    const handleTimeOut = async () => {
         const nextLives = lives - 1;
         setLives(nextLives);
         setStreak(0);
         setIsConfirmed(true);
+        if (currentQuestion) {
+            try {
+                const res = await checkQuizAnswer({
+                    question_id: currentQuestion.id,
+                    selected_option: null,
+                });
+                setVerifiedResult({
+                    isCorrect: false,
+                    correctAnswer: res.correct_answer || '',
+                    explanation: res.explanation || '',
+                    clinicalCorrelation: res.clinical_correlation || '',
+                });
+            } catch {
+                setVerifiedResult({
+                    isCorrect: false,
+                    correctAnswer: 'Tempo esgotado',
+                });
+            }
+        }
     };
 
-    const handleConfirmAnswer = () => {
-        if (!selectedOption || isConfirmed) return;
+    const handleConfirmAnswer = async () => {
+        if (!currentQuestion || isConfirmed || verifyingAnswer) return;
+        const isSpatial = currentQuestion.questionType === 'SPATIAL_CLICK';
+        if (!selectedOption && (!isSpatial || !clickedPos3D)) return;
 
-        const isCorrect = selectedOption === currentQuestion.correctAnswer;
-        if (isCorrect) {
-            setCorrectCount((prev) => prev + 1);
-            setStreak((prev) => prev + 1);
-        } else {
-            setLives((prev) => prev - 1);
-            setStreak(0);
+        setVerifyingAnswer(true);
+        try {
+            const result = await checkQuizAnswer({
+                question_id: currentQuestion.id,
+                selected_option: selectedOption,
+                clicked_pos: clickedPos3D,
+            });
+            const isCorrect = Boolean(result.is_correct);
+            setVerifiedResult({
+                isCorrect,
+                correctAnswer: result.correct_answer || '',
+                explanation: result.explanation || '',
+                clinicalCorrelation: result.clinical_correlation || '',
+            });
+            if (isCorrect) {
+                setCorrectCount((prev) => prev + 1);
+                setStreak((prev) => prev + 1);
+            } else {
+                setLives((prev) => prev - 1);
+                setStreak(0);
+            }
+            setIsConfirmed(true);
+        } finally {
+            setVerifyingAnswer(false);
         }
-        setIsConfirmed(true);
     };
 
     const quizTitle = quizBone ? `${quizBone.name} - ${quizBone.region}` : 'Osso Temporal - Crânio';
@@ -472,30 +368,32 @@ export const QuizPage: React.FC<QuizPageProps> = ({
     const handleNextQuestion = () => {
         if (lives <= 0) {
             setQuizStatus('failed');
-            if (onQuizFinished) onQuizFinished(correctCount, activeQuestions.length, quizTitle);
+            if (onQuizFinished) onQuizFinished(correctCount, activeQuestions.length, quizTitle, quizBone?.id);
             return;
         }
 
         if (currentIndex + 1 >= activeQuestions.length) {
             setQuizStatus('completed');
-            if (onQuizFinished) onQuizFinished(correctCount, activeQuestions.length, quizTitle);
+            if (onQuizFinished) onQuizFinished(correctCount, activeQuestions.length, quizTitle, quizBone?.id);
             return;
         }
 
         const nextIdx = currentIndex + 1;
         setCurrentIndex(nextIdx);
         setSelectedOption(null);
+        setClickedPos3D(null);
+        setVerifiedResult(null);
         setIsConfirmed(false);
         setTimeLeft(30);
         if (onQuizProgress) {
-            onQuizProgress(nextIdx + 1, activeQuestions.length, quizTitle);
+            onQuizProgress(nextIdx + 1, activeQuestions.length, quizTitle, quizBone?.id);
         }
     };
 
     const handleExitWhilePlaying = () => {
-        if (quizBone && quizStatus === 'playing' && onQuizProgress) {
+        if (quizBone && quizStatus === 'playing' && onQuizProgress && activeQuestions.length > 0) {
             const answeredCount = isConfirmed ? currentIndex + 1 : currentIndex;
-            onQuizProgress(answeredCount, activeQuestions.length, quizTitle);
+            onQuizProgress(answeredCount, activeQuestions.length, quizTitle, quizBone.id);
         }
         onExit();
     };
@@ -505,6 +403,8 @@ export const QuizPage: React.FC<QuizPageProps> = ({
         setActiveQuestions(pickRandomQuestions(questionPool, targetCount));
         setCurrentIndex(0);
         setSelectedOption(null);
+        setClickedPos3D(null);
+        setVerifiedResult(null);
         setIsConfirmed(false);
         setLives(maxLives);
         setStreak(0);
@@ -556,7 +456,7 @@ export const QuizPage: React.FC<QuizPageProps> = ({
                                 Quiz 3D - Prova da Alfinetada
                             </h1>
                             <p className="text-slate-500 text-sm">
-                                Teste seus conhecimentos na tradicional prova prática de laboratório.
+                                Teste seus conhecimentos na tradicional prova prática de laboratório com correção segura no servidor.
                             </p>
                         </div>
 
@@ -594,7 +494,7 @@ export const QuizPage: React.FC<QuizPageProps> = ({
                     <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
                         {filteredBones.map((bone) => {
                             const questionsTotal =
-                                bone.name === 'Osso Temporal' ? 15 : bone.landmarks.length;
+                                bone.quizQuestionsCount || (bone.name === 'Osso Temporal' ? 15 : bone.landmarks.length);
 
                             return (
                                 <div
@@ -655,11 +555,23 @@ export const QuizPage: React.FC<QuizPageProps> = ({
         );
     }
 
+    if (loadingQuestions || !currentQuestion) {
+        return (
+            <div className="flex-1 flex flex-col items-center justify-center p-8 bg-stone-50 gap-3">
+                <div className="w-10 h-10 border-3 border-[#2E482C] border-t-transparent rounded-full animate-spin" />
+                <p className="text-sm font-medium text-slate-600">
+                    Carregando questões autenticadas de {quizBone.name}...
+                </p>
+            </div>
+        );
+    }
+
     const formattedTime = `${String(Math.floor(timeLeft / 60)).padStart(2, '0')}:${String(timeLeft % 60).padStart(2, '0')}s`;
     const timerRadius = 16;
     const timerCircumference = 2 * Math.PI * timerRadius;
     const timerOffset = timerCircumference - (timeLeft / 30) * timerCircumference;
     const heartSlots = Array.from({ length: maxLives }, (_, i) => i + 1);
+    const isSpatialQuestion = currentQuestion.questionType === 'SPATIAL_CLICK';
 
     if (quizStatus === 'failed' || quizStatus === 'completed') {
         const isVictory = quizStatus === 'completed';
@@ -826,6 +738,10 @@ export const QuizPage: React.FC<QuizPageProps> = ({
                             <SinglePinViewer
                                 modelUrl={quizBone.modelUrl}
                                 pinPosition={currentQuestion.pos3D}
+                                isSpatialMode={isSpatialQuestion && !isConfirmed}
+                                clickedPosition={clickedPos3D}
+                                showTargetPin={!isSpatialQuestion || isConfirmed}
+                                onSpatialClick={(pos) => setClickedPos3D(pos)}
                             />
                         </Suspense>
 
@@ -839,7 +755,9 @@ export const QuizPage: React.FC<QuizPageProps> = ({
 
                     <div className="absolute bottom-20 left-1/2 -translate-x-1/2 z-10 bg-white/95 px-5 py-2 rounded-full shadow-md">
                         <p className="text-slate-800 text-xs italic whitespace-nowrap">
-                            Gire e examine a peça para identificar a estrutura apontada pelo Alfinete nº {currentIndex + 1}
+                            {isSpatialQuestion
+                                ? 'Modo Identificação Espacial: clique diretamente na região correspondente do modelo 3D ou escolha abaixo'
+                                : `Gire e examine a peça para identificar a estrutura apontada pelo Alfinete nº ${currentIndex + 1}`}
                         </p>
                     </div>
 
@@ -879,14 +797,26 @@ export const QuizPage: React.FC<QuizPageProps> = ({
                 </div>
 
                 <aside className="w-96 bg-white rounded-2xl shadow-[0px_4px_12px_0px_rgba(30,41,59,0.05)] border border-stone-100 p-6 flex flex-col gap-5 flex-shrink-0 overflow-y-auto">
-                    <h2 className="text-slate-800 text-xl font-serif font-semibold leading-7">
-                        Qual é o acidente anatômico indicado pelo Alfinete nº {currentIndex + 1} em {quizBone.name}?
-                    </h2>
+                    <div className="space-y-1.5">
+                        <span className="inline-block px-2.5 py-0.5 rounded-full bg-stone-100 text-[#2E482C] text-[10px] font-bold uppercase tracking-wider">
+                            {isSpatialQuestion ? 'Identificação Espacial 3D' : 'Múltipla Escolha'}
+                        </span>
+                        <h2 className="text-slate-800 text-xl font-serif font-semibold leading-7">
+                            {currentQuestion.statement ||
+                                `Qual é o acidente anatômico indicado pelo Alfinete nº ${currentIndex + 1} em ${quizBone.name}?`}
+                        </h2>
+                    </div>
+
+                    {isSpatialQuestion && clickedPos3D && (
+                        <div className="px-3.5 py-2 rounded-xl bg-sky-50 border border-sky-200 text-sky-800 text-xs font-medium">
+                            Ponto espacial 3D marcado: ({clickedPos3D[0]}, {clickedPos3D[1]}, {clickedPos3D[2]})
+                        </div>
+                    )}
 
                     <div className="flex flex-col gap-2.5">
                         {currentQuestion.options.map((option, idx) => {
                             const isSelected = selectedOption === option;
-                            const isCorrectOption = option === currentQuestion.correctAnswer;
+                            const isCorrectOption = isConfirmed && verifiedResult?.correctAnswer === option;
 
                             let cardClasses = 'border-stone-200 bg-white hover:bg-stone-50/60';
                             let radioClasses = 'border-stone-200';
@@ -944,16 +874,16 @@ export const QuizPage: React.FC<QuizPageProps> = ({
                         })}
                     </div>
 
-                    {isConfirmed && (
+                    {isConfirmed && verifiedResult && (
                         <div
-                            className={`p-3.5 rounded-xl border text-xs leading-relaxed ${selectedOption === currentQuestion.correctAnswer
+                            className={`p-3.5 rounded-xl border text-xs leading-relaxed space-y-2 ${verifiedResult.isCorrect
                                 ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
                                 : 'bg-red-50 border-red-200 text-red-800'
                                 }`}
                         >
-                            {selectedOption === currentQuestion.correctAnswer ? (
+                            {verifiedResult.isCorrect ? (
                                 <p className="font-semibold">
-                                    ✓ Resposta certa! O alfinete aponta para: {currentQuestion.correctAnswer}.
+                                    ✓ Resposta certa! O acidente anatômico correto é: {verifiedResult.correctAnswer}.
                                 </p>
                             ) : (
                                 <div className="space-y-1">
@@ -961,9 +891,19 @@ export const QuizPage: React.FC<QuizPageProps> = ({
                                         ✗ Você perdeu 1 coração! ({lives} {lives === 1 ? 'vida restante' : 'vidas restantes'})
                                     </p>
                                     <p>
-                                        A resposta correta é: <strong>{currentQuestion.correctAnswer}</strong>.
+                                        A resposta correta é: <strong>{verifiedResult.correctAnswer}</strong>.
                                     </p>
                                 </div>
+                            )}
+                            {verifiedResult.explanation && (
+                                <p className="pt-1 border-t border-black/10 text-[11px] opacity-90">
+                                    <strong>Explicação anatômica:</strong> {verifiedResult.explanation}
+                                </p>
+                            )}
+                            {verifiedResult.clinicalCorrelation && (
+                                <p className="text-[11px] opacity-90">
+                                    <strong>Correlação clínica:</strong> {verifiedResult.clinicalCorrelation}
+                                </p>
                             )}
                         </div>
                     )}
@@ -971,14 +911,14 @@ export const QuizPage: React.FC<QuizPageProps> = ({
                     {!isConfirmed ? (
                         <button
                             type="button"
-                            disabled={!selectedOption}
+                            disabled={verifyingAnswer || (!selectedOption && (!isSpatialQuestion || !clickedPos3D))}
                             onClick={handleConfirmAnswer}
-                            className={`w-full h-14 rounded-full text-sm font-bold tracking-tight flex items-center justify-center gap-2 transition-all cursor-pointer ${selectedOption
+                            className={`w-full h-14 rounded-full text-sm font-bold tracking-tight flex items-center justify-center gap-2 transition-all cursor-pointer ${!verifyingAnswer && (selectedOption || (isSpatialQuestion && clickedPos3D))
                                 ? 'bg-[#2E482C] hover:bg-[#233821] text-white shadow-md'
                                 : 'bg-stone-200 text-stone-400 cursor-not-allowed'
                                 }`}
                         >
-                            <span>CONFIRMAR RESPOSTA</span>
+                            <span>{verifyingAnswer ? 'CORRIGINDO NO SERVIDOR...' : 'CONFIRMAR RESPOSTA'}</span>
                             <ArrowRight className="w-4 h-4" />
                         </button>
                     ) : (

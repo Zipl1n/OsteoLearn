@@ -1,10 +1,19 @@
 from django.contrib import admin
-from .models import User, AuditLog, Bone, AnatomicalLandmark, BonePathology, QuizQuestion
+from .models import (
+    User,
+    AuditLog,
+    Bone,
+    AnatomicalLandmark,
+    BonePathology,
+    QuizQuestion,
+    BoneStudyRecord,
+    QuizAttempt,
+)
 
 
 @admin.register(User)
 class UserAdmin(admin.ModelAdmin):
-    list_display = ('email', 'name', 'role', 'lgpd_consent', 'is_staff', 'is_superuser')
+    list_display = ('email', 'name', 'role', 'streak_days', 'lgpd_consent', 'is_staff', 'is_superuser')
     list_filter = ('role', 'lgpd_consent', 'is_staff')
     search_fields = ('email', 'name')
 
@@ -56,6 +65,20 @@ class BonePathologyAdmin(admin.ModelAdmin):
 
 @admin.register(QuizQuestion)
 class QuizQuestionAdmin(admin.ModelAdmin):
-    list_display = ('id', 'bone', 'correct_answer', 'pos_x', 'pos_y', 'pos_z', 'is_active')
-    list_filter = ('bone', 'is_active')
-    search_fields = ('correct_answer', 'option_a', 'option_b', 'option_c', 'option_d')
+    list_display = ('id', 'bone', 'question_type', 'statement', 'correct_answer', 'pos_x', 'pos_y', 'pos_z', 'is_active')
+    list_filter = ('bone', 'question_type', 'is_active')
+    search_fields = ('statement', 'correct_answer', 'option_a', 'option_b', 'option_c', 'option_d')
+
+
+@admin.register(BoneStudyRecord)
+class BoneStudyRecordAdmin(admin.ModelAdmin):
+    list_display = ('user', 'bone', 'studied_in_atlas', 'last_accuracy', 'best_accuracy', 'attempts_count', 'updated_at')
+    list_filter = ('studied_in_atlas', 'bone')
+    search_fields = ('user__email', 'bone__name')
+
+
+@admin.register(QuizAttempt)
+class QuizAttemptAdmin(admin.ModelAdmin):
+    list_display = ('user', 'bone', 'correct_count', 'total_questions', 'accuracy', 'created_at')
+    list_filter = ('bone',)
+    search_fields = ('user__email', 'bone__name')

@@ -5,4 +5,7 @@ __pycache__/
 *.pyc
 *.pyo
 .pytest_cache/
+venv/
+db.sqlite3
+backend/media/
 

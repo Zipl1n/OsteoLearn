@@ -1,18 +1,22 @@
 import os
+import sys
 from pathlib import Path
 from datetime import timedelta
 import dj_database_url
 from dotenv import load_dotenv
 
-load_dotenv()
-
 BASE_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(BASE_DIR / '.env')
 
 SECRET_KEY = os.getenv('SECRET_KEY', 'chave-temporaria-caso-nao-ache')
 
 DEBUG = os.getenv('DEBUG', 'True') == 'True'
 
-ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1,*').split(',')
+ALLOWED_HOSTS = [
+    host.strip()
+    for host in os.getenv('ALLOWED_HOSTS', '*').split(',')
+    if host.strip()
+]
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -77,21 +81,21 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'core.wsgi.application'
 
-import sys
+db_config = dj_database_url.config(
+    default=os.getenv('DATABASE_URL', f"sqlite:///{BASE_DIR / 'db.sqlite3'}"),
+    conn_max_age=600,
+    ssl_require=bool(os.getenv('DATABASE_URL', '').startswith('postgres'))
+)
 
-DATABASES = {
-    'default': dj_database_url.config(
-        default=os.getenv('DATABASE_URL'),
-        conn_max_age=600,
-        ssl_require=True
-    )
-}
-
-if 'test' in sys.argv:
-    DATABASES['default'] = {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': ':memory:',
+if 'test' in sys.argv or 'pytest' in sys.modules or any('pytest' in arg for arg in sys.argv):
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': ':memory:',
+        }
     }
+else:
+    DATABASES = {'default': db_config}
 
 AUTH_PASSWORD_VALIDATORS = [
     {
@@ -115,25 +119,34 @@ USE_TZ = True
 SOCIALACCOUNT_LOGIN_ON_GET = True
 
 STATIC_URL = 'static/'
+MEDIA_URL = '/media/'
+MEDIA_ROOT = BASE_DIR / 'media'
 
-EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
-EMAIL_HOST = 'smtp.gmail.com'
-EMAIL_PORT = 587
-EMAIL_USE_TLS = True
+EMAIL_BACKEND = os.getenv('EMAIL_BACKEND', 'django.core.mail.backends.smtp.EmailBackend')
+EMAIL_HOST = os.getenv('EMAIL_HOST', 'smtp.gmail.com')
+EMAIL_PORT = int(os.getenv('EMAIL_PORT', '587'))
+EMAIL_USE_TLS = os.getenv('EMAIL_USE_TLS', 'True') == 'True'
 EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER')
 EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD')
-DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'OsteoLearn <[EMAIL_ADDRESS]>')
+DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'OsteoLearn <noreply@osteolearn.local>')
 
 AUTH_USER_MODEL = 'accounts.User'
 
-frontend_origin = os.getenv('FRONTEND_URL', 'http://localhost:5173')
+FRONTEND_URL = os.getenv('FRONTEND_URL', '')
 
+raw_cors_origins = os.getenv('CORS_ALLOWED_ORIGINS', FRONTEND_URL)
 CORS_ALLOWED_ORIGINS = [
-    frontend_origin,
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
+    origin.strip()
+    for origin in raw_cors_origins.split(',')
+    if origin.strip()
 ]
+CORS_ALLOW_ALL_ORIGINS = DEBUG and len(CORS_ALLOWED_ORIGINS) == 0
 CORS_ALLOW_CREDENTIALS = True
+
+LOGIN_REDIRECT_URL = os.getenv('LOGIN_REDIRECT_URL', FRONTEND_URL or '/')
+
+MAX_AUTH_ATTEMPTS = int(os.getenv('MAX_AUTH_ATTEMPTS', '5'))
+AUTH_LOCKOUT_MINUTES = int(os.getenv('AUTH_LOCKOUT_MINUTES', '15'))
 
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
@@ -151,8 +164,6 @@ SIMPLE_JWT = {
     'BLACKLIST_AFTER_ROTATION': True,
     'AUTH_HEADER_TYPES': ('Bearer',),
 }
-
-LOGIN_REDIRECT_URL = 'http://localhost:5173/'
 
 SOCIALACCOUNT_PROVIDERS = {
     'google': {

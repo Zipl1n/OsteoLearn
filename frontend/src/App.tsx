@@ -29,11 +29,11 @@ import {
   ArrowRight,
 } from 'lucide-react';
 import { useAuth } from './context/AuthContext';
-import { LoginPage } from './components/Auth/LoginPage';
-import { AdminLogsModal } from './components/Auth/AdminLogsModal';
-import { TermsModal } from './components/Auth/TermsModal';
-import { PrivacyModal } from './components/Auth/PrivacyModal';
-import { LGPDConsentPage } from './components/Auth/LGPDConsentPage';
+import { LoginPage } from './components/auth/LoginPage';
+import { AdminLogsModal } from './components/auth/AdminLogsModal';
+import { TermsModal } from './components/auth/TermsModal';
+import { PrivacyModal } from './components/auth/PrivacyModal';
+import { LGPDConsentPage } from './components/auth/LGPDConsentPage';
 import { HomePage } from './components/Home/HomePage';
 import { QuizPage } from './components/Quiz/QuizPage';
 import {
@@ -43,7 +43,13 @@ import {
   type AtlasLandmark,
 } from './components/Atlas/AtlasCatalogPage';
 import { PathologyGuidePage } from './components/Patologias/PathologyGuidePage';
-import { calibrateLandmark3D } from './services/api';
+import {
+  calibrateLandmark3D,
+  finishQuizAttempt,
+  getAtlasBones,
+  getDashboardStats,
+  recordBoneStudy,
+} from './services/api';
 
 function AnatomicalBoneViewer({
   modelUrl,
@@ -271,10 +277,8 @@ export default function App() {
     }
   };
 
-  useEffect(() => {
-    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/auth';
-    fetch(`${apiUrl}/atlas/bones/`)
-      .then((res) => (res.ok ? res.json() : null))
+  const fetchAtlasCatalog = () => {
+    getAtlasBones()
       .then((data) => {
         if (data && Array.isArray(data.bones) && data.bones.length > 0) {
           setAtlasBones(data.bones);
@@ -285,11 +289,11 @@ export default function App() {
         }
       })
       .catch(() => { });
-  }, []);
+  };
 
-  const userStatsKey = user?.email
-    ? `osteolearn_user_stats_${user.email.toLowerCase()}`
-    : 'osteolearn_user_stats_guest';
+  useEffect(() => {
+    fetchAtlasCatalog();
+  }, []);
 
   const getBoneWeightOutOf206 = (boneName: string): number => {
     const n = boneName.toLowerCase();
@@ -327,90 +331,48 @@ export default function App() {
     return Math.min(206, total);
   };
 
-  const loadStatsForUser = (key: string) => {
-    try {
-      const saved = localStorage.getItem(key);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        const studiedList: string[] = Array.isArray(parsed.studiedBones)
-          ? parsed.studiedBones
-          : [];
-        const cleanedLastQuizName =
-          typeof parsed.lastQuizName === 'string'
-            ? parsed.lastQuizName.replace(/\u2014|\u2013/g, '-')
-            : '';
-        const loadedStats = {
-          totalQuizzes: parsed.totalQuizzes ?? 0,
-          avgAccuracy: parsed.avgAccuracy ?? 0,
-          temporalAccuracy: parsed.temporalAccuracy ?? 0,
-          streakDays: parsed.streakDays ?? 0,
-          masteredBonesCount:
-            parsed.masteredBonesCount ?? computeMasteredOutOf206(studiedList),
-          lastStudyDate: parsed.lastStudyDate ?? '',
-          lastQuizName: cleanedLastQuizName,
-          lastQuizProgress: parsed.lastQuizProgress ?? 0,
-          boneScores:
-            parsed.boneScores && typeof parsed.boneScores === 'object'
-              ? parsed.boneScores
-              : ({} as Record<string, number>),
-          studiedBones: studiedList,
-        };
-        if (cleanedLastQuizName !== parsed.lastQuizName) {
-          localStorage.setItem(key, JSON.stringify(loadedStats));
-        }
-        return loadedStats;
-      }
-    } catch {
-      return {
-        totalQuizzes: 0,
-        avgAccuracy: 0,
-        temporalAccuracy: 0,
-        streakDays: 0,
-        masteredBonesCount: 0,
-        lastStudyDate: '',
-        lastQuizName: '',
-        lastQuizProgress: 0,
-        boneScores: {} as Record<string, number>,
-        studiedBones: [] as string[],
-      };
-    }
-    return {
-      totalQuizzes: 0,
-      avgAccuracy: 0,
-      temporalAccuracy: 0,
-      streakDays: 0,
-      masteredBonesCount: 0,
-      lastStudyDate: '',
-      lastQuizName: '',
-      lastQuizProgress: 0,
-      boneScores: {} as Record<string, number>,
-      studiedBones: [] as string[],
-    };
+  const emptyStats = {
+    totalQuizzes: 0,
+    avgAccuracy: 0,
+    temporalAccuracy: 0,
+    streakDays: 0,
+    masteredBonesCount: 0,
+    lastStudyDate: '',
+    lastQuizName: '',
+    lastQuizProgress: 0,
+    boneScores: {} as Record<string, number>,
+    studiedBones: [] as string[],
   };
 
-  const [quizStats, setQuizStats] = useState(() => loadStatsForUser(userStatsKey));
+  const [quizStats, setQuizStats] = useState(emptyStats);
+
+  const applyServerStats = (data: any) => {
+    if (!data) return;
+    const studiedList: string[] = Array.isArray(data.studiedBones) ? data.studiedBones : [];
+    setQuizStats({
+      totalQuizzes: data.totalQuizzes ?? 0,
+      avgAccuracy: data.avgAccuracy ?? 0,
+      temporalAccuracy: data.temporalAccuracy ?? 0,
+      streakDays: data.streakDays ?? 0,
+      masteredBonesCount: computeMasteredOutOf206(studiedList),
+      lastStudyDate: new Date().toISOString().slice(0, 10),
+      lastQuizName: typeof data.lastQuizName === 'string' ? data.lastQuizName : '',
+      lastQuizProgress: data.lastQuizProgress ?? 0,
+      boneScores: data.boneScores && typeof data.boneScores === 'object' ? data.boneScores : {},
+      studiedBones: studiedList,
+    });
+  };
 
   useEffect(() => {
-    setQuizStats(loadStatsForUser(userStatsKey));
+    if (!user) {
+      setQuizStats(emptyStats);
+      return;
+    }
     setCurrentPage('dashboard');
-  }, [userStatsKey]);
-
-  const computeNextStreak = (prevStreak: number, prevDate: string): { streak: number; date: string } => {
-    const today = new Date().toISOString().slice(0, 10);
-    if (!prevDate) {
-      return { streak: 1, date: today };
-    }
-    if (prevDate === today) {
-      return { streak: Math.max(1, prevStreak), date: today };
-    }
-    const yesterdayDate = new Date();
-    yesterdayDate.setDate(yesterdayDate.getDate() - 1);
-    const yesterday = yesterdayDate.toISOString().slice(0, 10);
-    if (prevDate === yesterday) {
-      return { streak: prevStreak + 1, date: today };
-    }
-    return { streak: 1, date: today };
-  };
+    getDashboardStats()
+      .then((data) => applyServerStats(data))
+      .catch(() => { });
+  }, [user?.email]);
 
   const controlsRef = useRef<OrbitControlsImpl | null>(null);
 
@@ -457,17 +419,21 @@ export default function App() {
     }
     setQuizStats((prev) => {
       const nextStudied = Array.from(new Set([...(prev.studiedBones || []), bone.name]));
-      const { streak, date } = computeNextStreak(prev.streakDays, prev.lastStudyDate);
-      const updated = {
+      return {
         ...prev,
-        streakDays: streak,
-        lastStudyDate: date,
+        streakDays: Math.max(1, prev.streakDays),
         studiedBones: nextStudied,
         masteredBonesCount: computeMasteredOutOf206(nextStudied),
       };
-      localStorage.setItem(userStatsKey, JSON.stringify(updated));
-      return updated;
     });
+    recordBoneStudy({
+      bone_id: bone.id,
+      bone_name: bone.name,
+      activity_name: `Atlas 3D: ${bone.name}`,
+      progress: 100,
+    })
+      .then((data) => applyServerStats(data))
+      .catch(() => { });
     setCurrentPage('atlas-viewer');
   };
 
@@ -480,54 +446,39 @@ export default function App() {
     setCurrentPage('atlas-catalog');
   };
 
-  const handleQuizFinished = (correctCount: number, totalQuestions: number, quizTitle: string) => {
-    const attemptAccuracy = Math.round((correctCount / totalQuestions) * 100);
+  const handleQuizFinished = (
+    correctCount: number,
+    totalQuestions: number,
+    quizTitle: string,
+    boneId?: number
+  ) => {
     const testedBoneName = quizTitle.split(' - ')[0];
-    setQuizStats((prev) => {
-      const nextTotal = prev.totalQuizzes + 1;
-      const nextAvg = Math.round((prev.avgAccuracy * prev.totalQuizzes + attemptAccuracy) / nextTotal);
-      const nextBoneScores = {
-        ...(prev.boneScores || {}),
-        [testedBoneName]: attemptAccuracy,
-      };
-      const nextStudied = Array.from(new Set([...(prev.studiedBones || []), testedBoneName]));
-      const { streak, date } = computeNextStreak(prev.streakDays, prev.lastStudyDate);
-      const updated = {
-        ...prev,
-        totalQuizzes: nextTotal,
-        avgAccuracy: nextAvg,
-        temporalAccuracy: attemptAccuracy,
-        streakDays: streak,
-        lastStudyDate: date,
-        studiedBones: nextStudied,
-        masteredBonesCount: computeMasteredOutOf206(nextStudied),
-        lastQuizName: quizTitle,
-        lastQuizProgress: attemptAccuracy,
-        boneScores: nextBoneScores,
-      };
-      localStorage.setItem(userStatsKey, JSON.stringify(updated));
-      return updated;
-    });
+    finishQuizAttempt({
+      bone_id: boneId,
+      bone_name: testedBoneName,
+      correct_count: correctCount,
+      total_questions: totalQuestions,
+    })
+      .then((data) => applyServerStats(data))
+      .catch(() => { });
   };
 
-  const handleQuizProgress = (currentQuestionNumber: number, totalQuestions: number, quizTitle: string) => {
+  const handleQuizProgress = (
+    currentQuestionNumber: number,
+    totalQuestions: number,
+    quizTitle: string,
+    boneId?: number
+  ) => {
     const progressPercent = Math.round((currentQuestionNumber / totalQuestions) * 100);
     const testedBoneName = quizTitle.split(' - ')[0];
-    setQuizStats((prev) => {
-      const nextStudied = Array.from(new Set([...(prev.studiedBones || []), testedBoneName]));
-      const { streak, date } = computeNextStreak(prev.streakDays, prev.lastStudyDate);
-      const updated = {
-        ...prev,
-        streakDays: streak,
-        lastStudyDate: date,
-        studiedBones: nextStudied,
-        masteredBonesCount: computeMasteredOutOf206(nextStudied),
-        lastQuizName: quizTitle,
-        lastQuizProgress: progressPercent,
-      };
-      localStorage.setItem(userStatsKey, JSON.stringify(updated));
-      return updated;
-    });
+    recordBoneStudy({
+      bone_id: boneId,
+      bone_name: testedBoneName,
+      activity_name: quizTitle,
+      progress: progressPercent,
+    })
+      .then((data) => applyServerStats(data))
+      .catch(() => { });
   };
 
   if (!user) {
@@ -655,7 +606,7 @@ export default function App() {
                 Configurações da Conta
               </div>
 
-              {user.role === 'ADMIN' && (
+              {(user.role === 'ADMIN' || user.role === 'ADM') && (
                 <button
                   onClick={() => {
                     setIsSettingsOpen(false);
@@ -664,7 +615,7 @@ export default function App() {
                   className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-200 hover:text-white font-medium transition-colors cursor-pointer text-left"
                 >
                   <ShieldCheck className="w-4 h-4 text-indigo-300 flex-shrink-0" />
-                  <span className="flex-1 font-semibold">Logs de Auditoria (Admin)</span>
+                  <span className="flex-1 font-semibold">Gestão do Acervo e Auditoria (Admin)</span>
                 </button>
               )}
 
@@ -1092,6 +1043,7 @@ export default function App() {
       <AdminLogsModal
         isOpen={isAdminLogsOpen}
         onClose={() => setIsAdminLogsOpen(false)}
+        onCatalogUpdated={fetchAtlasCatalog}
       />
 
       <TermsModal
