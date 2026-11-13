@@ -1,9 +1,12 @@
+import pytest
 from unittest.mock import patch
 from rest_framework import status
 from rest_framework.test import APITestCase
-from accounts.models import User, AuditLog, TwoFactorCode
+from accounts.models import User, AuditLog
 
 
+@pytest.mark.integration
+@pytest.mark.django_db
 class AuthIntegrationTest(APITestCase):
     """
     Testes de integração cruzando API (endpoints REST), regras de negócio e banco de dados real descartável.
@@ -53,7 +56,7 @@ class AuthIntegrationTest(APITestCase):
             lgpd_consent_version='1.0'
         )
 
-        log = AuditLog.objects.create(
+        AuditLog.objects.create(
             user=usuario,
             action='USER_REGISTER',
             ip_address='127.0.0.1',

@@ -1,0 +1,9 @@
+target-version = "py312"
+line-length = 140
+extend-exclude = [
+    "**/migrations",
+    "frontend",
+]
+
+[lint]
+select = ["E", "F", "W"]
