@@ -1,0 +1,76 @@
+name: CI Pipeline - OsteoLearn
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  unit-tests:
+    name: Testes unitários
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout do repositório
+        uses: actions/checkout@v4
+
+      - name: Configurar Python 3.12 com cache pip
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: "backend/requirements.txt"
+
+      - name: Instalar dependências do projeto
+        run: pip install -r backend/requirements.txt
+
+      - name: Executar testes unitários isolados
+        working-directory: backend
+        run: pytest -m "not integration" -v
+
+  integration-tests:
+    name: Testes de integração
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout do repositório
+        uses: actions/checkout@v4
+
+      - name: Configurar Python 3.12 com cache pip
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: "backend/requirements.txt"
+
+      - name: Instalar dependências do projeto
+        run: pip install -r backend/requirements.txt
+
+      - name: Executar testes de integração com banco em memória
+        working-directory: backend
+        run: pytest -m integration -v
+
+  linter:
+    name: Linter
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout do repositório
+        uses: actions/checkout@v4
+
+      - name: Configurar Python 3.12 com cache pip
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: "backend/requirements.txt"
+
+      - name: Instalar dependências do projeto
+        run: pip install -r backend/requirements.txt
+
+      - name: Analisar código-fonte com Ruff
+        working-directory: backend
+        run: ruff check .
