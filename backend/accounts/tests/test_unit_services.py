@@ -1,9 +1,11 @@
 from unittest import TestCase
 from unittest.mock import patch, MagicMock
+import pytest
 from rest_framework.test import APIRequestFactory
 from accounts.views import send_2fa_email, LoginView
 
 
+@pytest.mark.unit
 class EmailServiceUnitTest(TestCase):
     """
     Testes unitários com Mocks para validar interações do serviço de e-mail e despacho de 2FA.
@@ -30,7 +32,7 @@ class EmailServiceUnitTest(TestCase):
     @patch('accounts.models.AuditLog.objects.create')
     def test_nao_deve_disparar_email_quando_login_falhar(self, mock_audit, mock_user_filter, mock_send_2fa):
         mock_user_filter.return_value.first.return_value = None
-        
+
         factory = APIRequestFactory()
         request = factory.post(
             '/api/auth/login/',

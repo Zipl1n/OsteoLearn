@@ -1,8 +1,10 @@
 from unittest import TestCase
+import pytest
 from rest_framework import serializers
 from accounts.serializers import validate_password_strength, RegisterSerializer
 
 
+@pytest.mark.unit
 class PasswordValidatorUnitTest(TestCase):
     """
     Testes unitários para as regras de validação de força de senha e consentimento LGPD.
@@ -55,8 +57,8 @@ class PasswordValidatorUnitTest(TestCase):
         """
         cenarios = [
             ("Ab1!xyz", False, "A senha deve ter no mínimo 8 caracteres."),
-            ("Ab1!xyzw", True, None),                                       
-            ("Ab1!xyz99", True, None),                                      
+            ("Ab1!xyzw", True, None),
+            ("Ab1!xyz99", True, None),
         ]
 
         for senha, deve_ser_valida, mensagem_esperada in cenarios:
