@@ -119,6 +119,7 @@ USE_TZ = True
 SOCIALACCOUNT_LOGIN_ON_GET = True
 
 STATIC_URL = 'static/'
+STATIC_ROOT = BASE_DIR / 'staticfiles'
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
@@ -142,6 +143,11 @@ CORS_ALLOWED_ORIGINS = [
 ]
 CORS_ALLOW_ALL_ORIGINS = DEBUG and len(CORS_ALLOWED_ORIGINS) == 0
 CORS_ALLOW_CREDENTIALS = True
+CSRF_TRUSTED_ORIGINS = [
+    origin for origin in CORS_ALLOWED_ORIGINS
+    if origin.startswith('http://') or origin.startswith('https://')
+]
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
 LOGIN_REDIRECT_URL = os.getenv('LOGIN_REDIRECT_URL', FRONTEND_URL or '/')
 

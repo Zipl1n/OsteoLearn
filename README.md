@@ -45,14 +45,16 @@ A proposta é proporcionar um ambiente de **aprendizagem ativa**, reduzindo a de
 
 * **Deploy & Hospedagem:** Vercel (Frontend SPA), Render (Backend Django API) e Supabase Cloud (Banco de dados gerenciado).
 
-* **Testes & Qualidade:** PyTest / Django Test Framework (testes unitários e regras de negócio), ESLint e Prettier (padronização de código).
+* **Testes & Qualidade:** PyTest + pytest-django (testes unitários e de integração isolados por markers), Ruff (linter Python) e GitHub Actions (pipeline de CI automatizada).
 
 ## Segurança, Autenticação e 2FA
 
 * **Autenticação Híbrida:** Login tradicional (e-mail e senha) e autenticação social via **Google OAuth 2.0**.
 * **Autenticação em Dois Fatores (2FA):** Envio de código OTP de 6 dígitos via SMTP para validação de acesso e recuperação de conta.
+* **Proteção contra Força Bruta e Enumeração:** Bloqueio automático após 5 tentativas falhas no login, 2FA ou recuperação de senha (`429 Too Many Requests`), com respostas genéricas que não expõem se o e-mail existe.
 * **Criptografia Zero-Knowledge:** Senhas protegidas com PBKDF2 SHA-256 e códigos de 2FA armazenados exclusivamente como hash SHA-256 no banco de dados.
 * **Política de Senha Forte:** Validação em tempo real exigindo no mínimo 8 caracteres, pelo menos 1 letra, 1 número e 1 caractere especial.
+* **Validação Estrita de Upload 3D e RLS:** Upload administrativo restrito exclusivamente a modelos `.glb` autênticos (inspeção de assinatura binária glTF 2.0 no frontend e backend) e Row Level Security (RLS) habilitado nas tabelas do PostgreSQL/Supabase.
 
 ---
 
@@ -119,8 +121,16 @@ source venv/bin/activate
 # Instale as dependências
 pip install -r requirements.txt
 
+# Configure o arquivo backend/.env com suas credenciais:
+# SECRET_KEY, DEBUG, ALLOWED_HOSTS, DATABASE_URL,
+# FRONTEND_URL, CORS_ALLOWED_ORIGINS, LOGIN_REDIRECT_URL,
+# EMAIL_HOST_USER, EMAIL_HOST_PASSWORD, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET
+
 # Execute as migrações do banco de dados
 python manage.py migrate
+
+# Popule o acervo inicial de ossos, acidentes, patologias e questões no banco
+python manage.py seed_atlas
 
 # Inicie o servidor da API
 python manage.py runserver
@@ -137,6 +147,20 @@ npm install
 npm run dev
 ```
 A aplicação estará acessível em: http://localhost:5173
+
+### 4. Testes Automatizados e Linter (Backend)
+```bash
+cd backend
+
+# Testes unitários isolados
+pytest -m "not integration" -v
+
+# Testes de integração (API + banco de teste em memória)
+pytest -m integration -v
+
+# Verificação de estilo e qualidade de código
+ruff check .
+```
 ## Autor
 
 Matheus Henrique Silva Oliveira  
