@@ -217,11 +217,23 @@ function AnatomicalBoneViewer({
 }
 
 export default function App() {
-  const { user, logout, exportMyData, deleteMyAccount } = useAuth();
+  const { user, loading, logout, exportMyData, deleteMyAccount } = useAuth();
 
-  const [currentPage, setCurrentPage] = useState<
+  const [currentPage, setCurrentPageState] = useState<
     'dashboard' | 'atlas-catalog' | 'atlas-viewer' | 'pathology-guide' | 'quiz'
   >('dashboard');
+
+  const setCurrentPage = (
+    nextPage: 'dashboard' | 'atlas-catalog' | 'atlas-viewer' | 'pathology-guide' | 'quiz',
+    pushToHistory = true
+  ) => {
+    setCurrentPageState((prev) => {
+      if (pushToHistory && prev !== nextPage) {
+        window.history.pushState({ osteoPage: nextPage }, '', window.location.pathname);
+      }
+      return nextPage;
+    });
+  };
   const [atlasBones, setAtlasBones] = useState<AtlasBone[]>(DEFAULT_ATLAS_BONES_FALLBACK);
   const [selectedBone, setSelectedBone] = useState<AtlasBone>(DEFAULT_ATLAS_BONES_FALLBACK[0]);
   const [focusedPathologyBone, setFocusedPathologyBone] = useState<AtlasBone | null>(null);
@@ -368,10 +380,33 @@ export default function App() {
       setQuizStats(emptyStats);
       return;
     }
-    setCurrentPage('dashboard');
+    setCurrentPageState('dashboard');
+    window.history.replaceState({ osteoPage: 'dashboard' }, '', window.location.pathname);
+    window.history.pushState({ osteoPage: 'dashboard' }, '', window.location.pathname);
     getDashboardStats()
       .then((data) => applyServerStats(data))
       .catch(() => { });
+  }, [user?.email]);
+
+  useEffect(() => {
+    if (!user) return;
+    const handlePopState = (event: PopStateEvent) => {
+      const targetPage = event.state?.osteoPage;
+      if (
+        targetPage === 'dashboard' ||
+        targetPage === 'atlas-catalog' ||
+        targetPage === 'atlas-viewer' ||
+        targetPage === 'pathology-guide' ||
+        targetPage === 'quiz'
+      ) {
+        setCurrentPageState(targetPage);
+      } else {
+        window.history.pushState({ osteoPage: 'dashboard' }, '', window.location.pathname);
+        setCurrentPageState('dashboard');
+      }
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
   }, [user?.email]);
 
   const controlsRef = useRef<OrbitControlsImpl | null>(null);
@@ -480,6 +515,17 @@ export default function App() {
       .then((data) => applyServerStats(data))
       .catch(() => { });
   };
+
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center h-screen w-screen bg-gradient-to-br from-[#1E331C] via-[#2E482C] to-[#121E11] text-white gap-4 font-sans select-none">
+        <div className="w-12 h-12 rounded-2xl bg-white/10 border border-white/20 flex items-center justify-center animate-pulse shadow-inner">
+          <Bone className="w-6 h-6 text-[#E7DFC6]" />
+        </div>
+        <p className="text-sm font-medium text-stone-200 tracking-wide">Carregando sua sessão no OsteoLearn...</p>
+      </div>
+    );
+  }
 
   if (!user) {
     return <LoginPage />;
