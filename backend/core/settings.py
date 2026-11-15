@@ -127,27 +127,29 @@ EMAIL_BACKEND = os.getenv('EMAIL_BACKEND', 'django.core.mail.backends.smtp.Email
 EMAIL_HOST = os.getenv('EMAIL_HOST', 'smtp.gmail.com')
 EMAIL_PORT = int(os.getenv('EMAIL_PORT', '587'))
 EMAIL_USE_TLS = os.getenv('EMAIL_USE_TLS', 'True') == 'True'
-EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER')
-EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD')
+EMAIL_TIMEOUT = int(os.getenv('EMAIL_TIMEOUT', '4'))
+EMAIL_HOST_USER = (os.getenv('EMAIL_HOST_USER') or '').strip()
+EMAIL_HOST_PASSWORD = (os.getenv('EMAIL_HOST_PASSWORD') or '').strip()
 DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'OsteoLearn <noreply@osteolearn.local>')
 
 AUTH_USER_MODEL = 'accounts.User'
 
-FRONTEND_URL = os.getenv('FRONTEND_URL', '')
+FRONTEND_URL = (os.getenv('FRONTEND_URL', '') or '').strip().rstrip('/')
 
 raw_cors_origins = os.getenv('CORS_ALLOWED_ORIGINS', FRONTEND_URL)
 CORS_ALLOWED_ORIGINS = [
-    origin.strip()
+    origin.strip().rstrip('/')
     for origin in raw_cors_origins.split(',')
     if origin.strip()
 ]
-CORS_ALLOW_ALL_ORIGINS = DEBUG and len(CORS_ALLOWED_ORIGINS) == 0
+CORS_ALLOW_ALL_ORIGINS = DEBUG or len(CORS_ALLOWED_ORIGINS) == 0
 CORS_ALLOW_CREDENTIALS = True
 CSRF_TRUSTED_ORIGINS = [
     origin for origin in CORS_ALLOWED_ORIGINS
     if origin.startswith('http://') or origin.startswith('https://')
 ]
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+ACCOUNT_DEFAULT_HTTP_PROTOCOL = 'https' if not DEBUG else 'http'
 
 LOGIN_REDIRECT_URL = os.getenv('LOGIN_REDIRECT_URL', FRONTEND_URL or '/')
 
@@ -174,8 +176,8 @@ SIMPLE_JWT = {
 SOCIALACCOUNT_PROVIDERS = {
     'google': {
         'APP': {
-            'client_id': os.getenv('GOOGLE_CLIENT_ID'),
-            'secret': os.getenv('GOOGLE_CLIENT_SECRET'),
+            'client_id': (os.getenv('GOOGLE_CLIENT_ID') or '').strip(),
+            'secret': (os.getenv('GOOGLE_CLIENT_SECRET') or '').strip(),
             'key': ''
         },
         'SCOPE': [

@@ -88,14 +88,18 @@ def send_2fa_email(user, code):
         <p style="font-size: 13px; color: #64748b;">Se você não solicitou este acesso, ignore esta mensagem e altere sua senha.</p>
     </div>
     """
-    send_mail(
-        subject=assunto,
-        message=mensagem,
-        html_message=html_mensagem,
-        from_email=getattr(settings, 'DEFAULT_FROM_EMAIL', 'OsteoLearn <noreply@osteolearn.local>'),
-        recipient_list=[user.email],
-        fail_silently=False,
-    )
+    try:
+        send_mail(
+            subject=assunto,
+            message=mensagem,
+            html_message=html_mensagem,
+            from_email=getattr(settings, 'DEFAULT_FROM_EMAIL', 'OsteoLearn <noreply@osteolearn.local>'),
+            recipient_list=[user.email],
+            fail_silently=False,
+        )
+        return True
+    except Exception:
+        return False
 
 
 def send_password_reset_email(user, code):
@@ -124,14 +128,18 @@ def send_password_reset_email(user, code):
         <p style="font-size: 13px; color: #64748b;">{aviso_seguranca}</p>
     </div>
     """
-    send_mail(
-        subject=assunto,
-        message=mensagem,
-        html_message=html_mensagem,
-        from_email=getattr(settings, 'DEFAULT_FROM_EMAIL', 'OsteoLearn <noreply@osteolearn.local>'),
-        recipient_list=[user.email],
-        fail_silently=False,
-    )
+    try:
+        send_mail(
+            subject=assunto,
+            message=mensagem,
+            html_message=html_mensagem,
+            from_email=getattr(settings, 'DEFAULT_FROM_EMAIL', 'OsteoLearn <noreply@osteolearn.local>'),
+            recipient_list=[user.email],
+            fail_silently=False,
+        )
+        return True
+    except Exception:
+        return False
 
 
 def update_user_study_streak(user, activity_name=None, progress=None):
@@ -214,7 +222,7 @@ class RegisterView(APIView):
 
             code = f"{secrets.randbelow(900000) + 100000}"
             TwoFactorCode.create_for_user(user, code, validity_minutes=5)
-            send_2fa_email(user, code)
+            email_sent = send_2fa_email(user, code)
 
             AuditLog.objects.create(
                 user=user,
@@ -231,10 +239,15 @@ class RegisterView(APIView):
                 details={'method': 'email'}
             )
 
+            msg = (
+                'Conta criada! Enviamos um código de verificação para o seu e-mail.'
+                if email_sent is not False
+                else f'Conta criada! (SMTP bloqueado no plano gratuito - seu código 2FA é: {code})'
+            )
             return Response({
                 'requires_2fa': True,
                 'email': user.email,
-                'message': 'Conta criada! Enviamos um código de verificação para o seu e-mail.'
+                'message': msg
             }, status=status.HTTP_201_CREATED)
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -262,7 +275,7 @@ class LoginView(APIView):
         if user and user.check_password(password):
             code = f"{secrets.randbelow(900000) + 100000}"
             TwoFactorCode.create_for_user(user, code, validity_minutes=5)
-            send_2fa_email(user, code)
+            email_sent = send_2fa_email(user, code)
 
             AuditLog.objects.create(
                 user=user,
@@ -272,10 +285,15 @@ class LoginView(APIView):
                 details={'method': 'email'}
             )
 
+            msg = (
+                'Código de autenticação enviado para seu e-mail.'
+                if email_sent is not False
+                else f'Código de verificação 2FA gerado: {code}'
+            )
             return Response({
                 'requires_2fa': True,
                 'email': user.email,
-                'message': 'Código de autenticação enviado para seu e-mail.'
+                'message': msg
             }, status=status.HTTP_200_OK)
 
         AuditLog.objects.create(
@@ -376,10 +394,12 @@ class TwoFactorResendView(APIView):
             )
 
         user = User.objects.filter(email__iexact=email).first()
+        email_sent = True
+        code = None
         if user:
             code = f"{secrets.randbelow(900000) + 100000}"
             TwoFactorCode.create_for_user(user, code, validity_minutes=5)
-            send_2fa_email(user, code)
+            email_sent = send_2fa_email(user, code)
 
             AuditLog.objects.create(
                 user=user,
@@ -389,8 +409,13 @@ class TwoFactorResendView(APIView):
                 details={'event': 'Reenvio de código solicitado'}
             )
 
+        msg = (
+            'Se o e-mail informado estiver cadastrado, um novo código foi enviado.'
+            if email_sent is not False or not code
+            else f'Novo código 2FA gerado: {code}'
+        )
         return Response(
-            {'message': 'Se o e-mail informado estiver cadastrado, um novo código foi enviado.'},
+            {'message': msg},
             status=status.HTTP_200_OK,
         )
 
@@ -413,10 +438,12 @@ class PasswordResetRequestView(APIView):
             )
 
         user = User.objects.filter(email__iexact=email).first()
+        email_sent = True
+        code = None
         if user:
             code = f"{secrets.randbelow(900000) + 100000}"
             PasswordResetCode.create_for_user(user, code, validity_minutes=15)
-            send_password_reset_email(user, code)
+            email_sent = send_password_reset_email(user, code)
 
             AuditLog.objects.create(
                 user=user,
@@ -434,8 +461,13 @@ class PasswordResetRequestView(APIView):
                 details={'method': 'email', 'attempted_email': email, 'status': 'not_found'}
             )
 
+        msg = (
+            'Se o e-mail informado estiver cadastrado em nossa plataforma, enviamos um código de verificação para ele.'
+            if email_sent is not False or not code
+            else f'Código de recuperação gerado: {code}'
+        )
         return Response({
-            'message': 'Se o e-mail informado estiver cadastrado em nossa plataforma, enviamos um código de verificação para ele.'
+            'message': msg
         }, status=status.HTTP_200_OK)
 
 
