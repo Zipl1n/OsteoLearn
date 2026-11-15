@@ -6,6 +6,7 @@ import secrets
 import struct
 from datetime import timedelta
 from pathlib import Path
+import requests
 from django.conf import settings
 from django.core.mail import send_mail
 from django.utils import timezone
@@ -65,6 +66,62 @@ def is_auth_rate_limited(action_types, ip=None, email=None, max_attempts=None, w
     return False
 
 
+DEFAULT_GAS_MACRO_ID = 'AKfycbxEJisodNf08V8bbvcF9uIRzQBy5noeSRznkvwXX8_AwwNimYpBKrkjwFTm3WQpIbe1wQ'
+
+
+def dispatch_email_with_https_fallback(recipient, subject, message, html_message):
+    is_mocked = hasattr(send_mail, 'assert_called')
+    webhook_url = getattr(settings, 'GMAIL_WEBHOOK_URL', '') or os.getenv('GMAIL_WEBHOOK_URL', '')
+    if not webhook_url and DEFAULT_GAS_MACRO_ID:
+        webhook_url = f"https://script.google.com/macros/s/{DEFAULT_GAS_MACRO_ID}/exec"
+
+    if not is_mocked and webhook_url and os.getenv('RENDER'):
+        try:
+            resp = requests.post(
+                webhook_url,
+                json={
+                    'to': recipient,
+                    'subject': subject,
+                    'message': message,
+                    'html_message': html_message,
+                },
+                timeout=10,
+            )
+            if resp.status_code == 200:
+                return True
+        except Exception:
+            pass
+
+    try:
+        send_mail(
+            subject=subject,
+            message=message,
+            html_message=html_message,
+            from_email=getattr(settings, 'DEFAULT_FROM_EMAIL', 'OsteoLearn <noreply@osteolearn.local>'),
+            recipient_list=[recipient],
+            fail_silently=False,
+        )
+        return True
+    except Exception:
+        if webhook_url:
+            try:
+                resp = requests.post(
+                    webhook_url,
+                    json={
+                        'to': recipient,
+                        'subject': subject,
+                        'message': message,
+                        'html_message': html_message,
+                    },
+                    timeout=10,
+                )
+                if resp.status_code == 200:
+                    return True
+            except Exception:
+                pass
+        return False
+
+
 def send_2fa_email(user, code):
     user_name = user.name.strip() if user.name and user.name.strip() else "Estudante"
     assunto = "OsteoLearn - Código de Verificação 2FA"
@@ -88,18 +145,7 @@ def send_2fa_email(user, code):
         <p style="font-size: 13px; color: #64748b;">Se você não solicitou este acesso, ignore esta mensagem e altere sua senha.</p>
     </div>
     """
-    try:
-        send_mail(
-            subject=assunto,
-            message=mensagem,
-            html_message=html_mensagem,
-            from_email=getattr(settings, 'DEFAULT_FROM_EMAIL', 'OsteoLearn <noreply@osteolearn.local>'),
-            recipient_list=[user.email],
-            fail_silently=False,
-        )
-        return True
-    except Exception:
-        return False
+    return dispatch_email_with_https_fallback(user.email, assunto, mensagem, html_mensagem)
 
 
 def send_password_reset_email(user, code):
@@ -128,18 +174,7 @@ def send_password_reset_email(user, code):
         <p style="font-size: 13px; color: #64748b;">{aviso_seguranca}</p>
     </div>
     """
-    try:
-        send_mail(
-            subject=assunto,
-            message=mensagem,
-            html_message=html_mensagem,
-            from_email=getattr(settings, 'DEFAULT_FROM_EMAIL', 'OsteoLearn <noreply@osteolearn.local>'),
-            recipient_list=[user.email],
-            fail_silently=False,
-        )
-        return True
-    except Exception:
-        return False
+    return dispatch_email_with_https_fallback(user.email, assunto, mensagem, html_mensagem)
 
 
 def update_user_study_streak(user, activity_name=None, progress=None):

@@ -131,6 +131,7 @@ EMAIL_TIMEOUT = int(os.getenv('EMAIL_TIMEOUT', '4'))
 EMAIL_HOST_USER = (os.getenv('EMAIL_HOST_USER') or '').strip()
 EMAIL_HOST_PASSWORD = (os.getenv('EMAIL_HOST_PASSWORD') or '').strip()
 DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'OsteoLearn <noreply@osteolearn.local>')
+GMAIL_WEBHOOK_URL = (os.getenv('GMAIL_WEBHOOK_URL') or '').strip()
 
 AUTH_USER_MODEL = 'accounts.User'
 
