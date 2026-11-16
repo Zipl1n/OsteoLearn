@@ -13,6 +13,7 @@ Um portal web interativo desenvolvido para auxiliar estudantes da área da saúd
 | **API RESTful (Backend Django)** | Render | https://osteolearn.onrender.com |
 | **Catálogo Público de Ossos 3D (JSON)** | Render + Supabase | https://osteolearn.onrender.com/api/bones/ |
 | **Pipeline CI/CD (GitHub Actions)** | GitHub Actions | https://github.com/Zipl1n/OsteoLearn/actions |
+| **Manual do Usuário Completo** | Documentação | [MANUAL_DO_USUARIO.md](./MANUAL_DO_USUARIO.md) |
 
 ---
 

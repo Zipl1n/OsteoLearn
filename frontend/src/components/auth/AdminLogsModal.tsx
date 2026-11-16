@@ -574,10 +574,10 @@ export const AdminLogsModal: React.FC<AdminLogsModalProps> = ({
 
                     <div className="p-3 rounded-xl bg-slate-950/80 border border-slate-800 flex flex-col">
                         <span className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold">
-                            Banco e Avaliações (RF24)
+                            Banco de Questões
                         </span>
                         <span className="text-xl font-bold text-cyan-300">
-                            {summary.total_questions} questões · {summary.total_quiz_attempts ?? 0} provas ({summary.global_avg_accuracy ?? 0}%)
+                            {summary.total_questions} questões
                         </span>
                     </div>
                 </div>
@@ -881,7 +881,7 @@ export const AdminLogsModal: React.FC<AdminLogsModalProps> = ({
                                     type="submit"
                                     className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-lg transition-colors cursor-pointer"
                                 >
-                                    {editingBoneId ? 'Salvar Alterações no Modelo' : 'Cadastrar Modelo 3D (RF22)'}
+                                    {editingBoneId ? 'Salvar Alterações no Modelo' : 'Cadastrar Modelo 3D'}
                                 </button>
                             </form>
 
@@ -965,7 +965,7 @@ export const AdminLogsModal: React.FC<AdminLogsModalProps> = ({
                             >
                                 <div className="flex items-center justify-between">
                                     <h3 className="text-sm font-bold text-white">
-                                        {editingQuestionId ? 'Editar Questão' : 'Nova Questão (RF23)'}
+                                        {editingQuestionId ? 'Editar Questão' : 'Nova Questão'}
                                     </h3>
                                     {editingQuestionId && (
                                         <button
@@ -1134,7 +1134,7 @@ export const AdminLogsModal: React.FC<AdminLogsModalProps> = ({
                                     type="submit"
                                     className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-lg transition-colors cursor-pointer"
                                 >
-                                    {editingQuestionId ? 'Salvar Questão' : 'Cadastrar Questão (RF23)'}
+                                    {editingQuestionId ? 'Salvar Questão' : 'Cadastrar Questão'}
                                 </button>
                             </form>
 
@@ -1527,7 +1527,7 @@ export const AdminLogsModal: React.FC<AdminLogsModalProps> = ({
                 </div>
 
                 <div className="p-4 border-t border-slate-800 bg-slate-950/60 flex justify-between items-center text-xs text-slate-500">
-                    <span>Painel Administrativo OsteoLearn · RF22, RF23 e LGPD</span>
+                    <span>Painel Administrativo OsteoLearn</span>
                     <button
                         onClick={onClose}
                         className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg transition-colors font-medium cursor-pointer"
