@@ -1,14 +1,20 @@
 import React, { useEffect, useState } from 'react';
 import {
     createAdminBone,
+    createAdminNotification,
     createAdminQuestion,
     deleteAdminBone,
+    deleteAdminNotification,
     deleteAdminQuestion,
+    dispatchExternalContingencyEmail,
+    EXTERNAL_GAS_WEBHOOK_URL,
     getAdminBones,
     getAdminLogs,
+    getAdminNotifications,
     getAdminQuestions,
     updateAdminBone,
     updateAdminQuestion,
+    type AppNotificationItem,
 } from '../../services/api';
 
 interface LogItem {
@@ -86,8 +92,17 @@ export const AdminLogsModal: React.FC<AdminLogsModalProps> = ({
     onClose,
     onCatalogUpdated,
 }) => {
-    const [activeTab, setActiveTab] = useState<'models' | 'questions' | 'logs'>('models');
+    const [activeTab, setActiveTab] = useState<'models' | 'questions' | 'notifications' | 'logs'>('models');
     const [logs, setLogs] = useState<LogItem[]>([]);
+    const [adminNotifications, setAdminNotifications] = useState<AppNotificationItem[]>([]);
+    const [notifTitle, setNotifTitle] = useState('');
+    const [notifMessage, setNotifMessage] = useState('');
+    const [notifCategory, setNotifCategory] = useState<'INFO' | 'ESTUDO' | 'ALERTA' | 'MANUTENCAO'>('INFO');
+    const [notifAudience, setNotifAudience] = useState<'ALL' | 'USER'>('ALL');
+    const [notifTargetEmail, setNotifTargetEmail] = useState('');
+    const [notifSendEmail, setNotifSendEmail] = useState(false);
+    const [contingencyEmails, setContingencyEmails] = useState('');
+    const [copiedCmd, setCopiedCmd] = useState(false);
     const [summary, setSummary] = useState<AdminSummary>({
         total_users: 0,
         total_logins: 0,
@@ -139,10 +154,11 @@ export const AdminLogsModal: React.FC<AdminLogsModalProps> = ({
         setLoading(true);
         setError('');
         try {
-            const [logsData, bonesData, questionsData] = await Promise.all([
+            const [logsData, bonesData, questionsData, notifsData] = await Promise.all([
                 getAdminLogs(),
                 getAdminBones(),
                 getAdminQuestions(),
+                getAdminNotifications().catch(() => ({ notifications: [], total: 0 })),
             ]);
             setLogs(logsData.logs || []);
             if (logsData.summary) {
@@ -154,6 +170,7 @@ export const AdminLogsModal: React.FC<AdminLogsModalProps> = ({
                 setQuestionBoneId(loadedBones[0].id);
             }
             setQuestions(questionsData.questions || []);
+            setAdminNotifications(notifsData.notifications || []);
         } catch (err: any) {
             setError(err.response?.data?.error || 'Erro ao carregar os dados administrativos.');
         } finally {
@@ -402,6 +419,75 @@ export const AdminLogsModal: React.FC<AdminLogsModalProps> = ({
         }
     };
 
+    const handleSendNotification = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setError('');
+        setFeedbackMsg('');
+        try {
+            const res = await createAdminNotification({
+                title: notifTitle.trim(),
+                message: notifMessage.trim(),
+                category: notifCategory,
+                audience: notifAudience,
+                target_email: notifAudience === 'USER' ? notifTargetEmail.trim() : undefined,
+                send_email: notifSendEmail,
+            });
+            setNotifTitle('');
+            setNotifMessage('');
+            setNotifTargetEmail('');
+            setNotifSendEmail(false);
+            setFeedbackMsg(res.message || 'Notificação publicada com sucesso!');
+            await fetchAllAdminData();
+            if (onCatalogUpdated) onCatalogUpdated();
+        } catch (err: any) {
+            setError(err.response?.data?.error || 'Erro ao publicar notificação.');
+        }
+    };
+
+    const handleDeleteNotification = async (id: number) => {
+        try {
+            await deleteAdminNotification(id);
+            setFeedbackMsg('Notificação removida com sucesso.');
+            await fetchAllAdminData();
+            if (onCatalogUpdated) onCatalogUpdated();
+        } catch (err: any) {
+            setError(err.response?.data?.error || 'Erro ao remover notificação.');
+        }
+    };
+
+    const handleDispatchContingencyExternal = async () => {
+        setError('');
+        setFeedbackMsg('');
+        const emailsList = (contingencyEmails.trim() || notifTargetEmail.trim())
+            .split(',')
+            .map((item) => item.trim())
+            .filter(Boolean);
+        if (emailsList.length === 0) {
+            setError('Informe ao menos um e-mail destinatário para o disparo externo de contingência.');
+            return;
+        }
+        const safeTitle = notifTitle.trim() || 'Aviso de Contingência OsteoLearn';
+        const safeMsg =
+            notifMessage.trim() ||
+            'Informamos que a plataforma OsteoLearn está passando por manutenção preventiva rápida e retornará em instantes.';
+        try {
+            for (const emailAddr of emailsList) {
+                await dispatchExternalContingencyEmail({
+                    to: emailAddr,
+                    title: safeTitle,
+                    message: safeMsg,
+                });
+            }
+            setFeedbackMsg(
+                `Comunicado externo disparado diretamente via Google Apps Script HTTPS para ${emailsList.length} destinatário(s)!`
+            );
+        } catch {
+            setError('Falha ao acionar o webhook externo de contingência.');
+        }
+    };
+
+    const externalPowerShellCommand = `Invoke-RestMethod -Uri "${EXTERNAL_GAS_WEBHOOK_URL}" -Method Post -ContentType "application/json; charset=utf-8" -Body (@{ to = "${(contingencyEmails || notifTargetEmail || 'estudante@exemplo.com').trim()}"; subject = "OsteoLearn - ${(notifTitle || 'Aviso Importante').replace(/"/g, "'")}"; message = "${(notifMessage || 'Comunicado da equipe OsteoLearn.').replace(/"/g, "'").replace(/\r?\n/g, ' ')}" } | ConvertTo-Json)`;
+
     const selectedQuestionBone = bones.find((b) => b.id === questionBoneId);
 
     const filteredLogs = logs.filter(
@@ -436,20 +522,20 @@ export const AdminLogsModal: React.FC<AdminLogsModalProps> = ({
     };
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-            <div className="relative w-full max-w-6xl max-h-[90vh] bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl flex flex-col overflow-hidden text-slate-100">
-                <div className="flex items-center justify-between p-6 border-b border-slate-800 bg-slate-950/60">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-3 sm:p-5">
+            <div className="relative w-full max-w-[96vw] xl:max-w-[1460px] max-h-[94vh] bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl flex flex-col overflow-hidden text-slate-100">
+                <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-950/60">
                     <div>
                         <div className="flex items-center gap-3">
                             <h2 className="text-xl font-bold tracking-tight text-white">
-                                Gestão de Acervo 3D, Questões e Auditoria
+                                Gestão de Acervo 3D, Questões, Comunicados e Auditoria
                             </h2>
                             <span className="px-2.5 py-0.5 text-xs font-semibold rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
                                 Painel do Administrador
                             </span>
                         </div>
                         <p className="text-sm text-slate-400 mt-1">
-                            Gerenciamento de modelos anatômicos GLB, banco de questões e trilha de auditoria LGPD.
+                            Gerenciamento de modelos anatômicos GLB, banco de questões, central de notificações e trilha de auditoria LGPD.
                         </p>
                     </div>
 
@@ -520,6 +606,16 @@ export const AdminLogsModal: React.FC<AdminLogsModalProps> = ({
                         </button>
                         <button
                             type="button"
+                            onClick={() => setActiveTab('notifications')}
+                            className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors cursor-pointer ${activeTab === 'notifications'
+                                ? 'bg-indigo-600 text-white'
+                                : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                                }`}
+                        >
+                            Notificações e Avisos
+                        </button>
+                        <button
+                            type="button"
                             onClick={() => setActiveTab('logs')}
                             className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors cursor-pointer ${activeTab === 'logs'
                                 ? 'bg-indigo-600 text-white'
@@ -557,10 +653,10 @@ export const AdminLogsModal: React.FC<AdminLogsModalProps> = ({
 
                 <div className="overflow-y-auto flex-1 p-6">
                     {activeTab === 'models' && (
-                        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
                             <form
                                 onSubmit={handleSaveBone}
-                                className="lg:col-span-5 bg-slate-950/70 border border-slate-800 rounded-xl p-4 space-y-3"
+                                className="lg:col-span-4 bg-slate-950/70 border border-slate-800 rounded-xl p-4 space-y-3"
                             >
                                 <div className="flex items-center justify-between">
                                     <h3 className="text-sm font-bold text-white">
@@ -789,11 +885,11 @@ export const AdminLogsModal: React.FC<AdminLogsModalProps> = ({
                                 </button>
                             </form>
 
-                            <div className="lg:col-span-7 space-y-3">
+                            <div className="lg:col-span-8 space-y-3 min-w-0">
                                 <h3 className="text-sm font-bold text-white">
                                     Acervo Cadastrado ({bones.length} modelos)
                                 </h3>
-                                <div className="border border-slate-800 rounded-xl overflow-hidden max-h-[520px] overflow-y-auto">
+                                <div className="border border-slate-800 rounded-xl overflow-x-auto max-h-[560px] overflow-y-auto">
                                     <table className="w-full text-left text-xs">
                                         <thead className="bg-slate-950 text-slate-400 uppercase border-b border-slate-800">
                                             <tr>
@@ -862,10 +958,10 @@ export const AdminLogsModal: React.FC<AdminLogsModalProps> = ({
                     )}
 
                     {activeTab === 'questions' && (
-                        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
                             <form
                                 onSubmit={handleSaveQuestion}
-                                className="lg:col-span-5 bg-slate-950/70 border border-slate-800 rounded-xl p-4 space-y-3"
+                                className="lg:col-span-4 bg-slate-950/70 border border-slate-800 rounded-xl p-4 space-y-3"
                             >
                                 <div className="flex items-center justify-between">
                                     <h3 className="text-sm font-bold text-white">
@@ -1042,7 +1138,7 @@ export const AdminLogsModal: React.FC<AdminLogsModalProps> = ({
                                 </button>
                             </form>
 
-                            <div className="lg:col-span-7 space-y-3">
+                            <div className="lg:col-span-8 space-y-3 min-w-0">
                                 <div className="flex flex-wrap items-center justify-between gap-2">
                                     <h3 className="text-sm font-bold text-white">
                                         Questões Cadastradas ({filteredQuestions.length})
@@ -1070,35 +1166,35 @@ export const AdminLogsModal: React.FC<AdminLogsModalProps> = ({
                                     </div>
                                 </div>
 
-                                <div className="border border-slate-800 rounded-xl overflow-hidden max-h-[520px] overflow-y-auto">
+                                <div className="border border-slate-800 rounded-xl overflow-x-auto max-h-[560px] overflow-y-auto">
                                     <table className="w-full text-left text-xs">
                                         <thead className="bg-slate-950 text-slate-400 uppercase border-b border-slate-800">
                                             <tr>
                                                 <th className="py-2.5 px-3">Osso / Enunciado</th>
-                                                <th className="py-2.5 px-3">Tipo</th>
-                                                <th className="py-2.5 px-3">Gabarito</th>
-                                                <th className="py-2.5 px-3">Status</th>
+                                                <th className="py-2.5 px-2.5">Tipo</th>
+                                                <th className="py-2.5 px-2.5">Gabarito</th>
+                                                <th className="py-2.5 px-2.5">Status</th>
                                                 <th className="py-2.5 px-3 text-right">Ações</th>
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-slate-800/60">
                                             {filteredQuestions.map((q) => (
                                                 <tr key={q.id} className="hover:bg-slate-800/30">
-                                                    <td className="py-2.5 px-3 max-w-[200px]">
-                                                        <div className="font-semibold text-white">{q.bone_name}</div>
+                                                    <td className="py-2.5 px-3 max-w-[210px]">
+                                                        <div className="font-semibold text-white truncate">{q.bone_name}</div>
                                                         <div className="text-slate-400 text-[11px] truncate">
                                                             {q.statement}
                                                         </div>
                                                     </td>
-                                                    <td className="py-2.5 px-3 text-slate-300">
+                                                    <td className="py-2.5 px-2.5 text-slate-300 whitespace-nowrap">
                                                         {q.question_type === 'SPATIAL_CLICK'
                                                             ? 'Espacial 3D'
                                                             : 'Múltipla Escolha'}
                                                     </td>
-                                                    <td className="py-2.5 px-3 font-medium text-amber-300">
-                                                        {q.correct_answer}
+                                                    <td className="py-2.5 px-2.5 font-medium text-amber-300 max-w-[200px]">
+                                                        <div className="line-clamp-2">{q.correct_answer}</div>
                                                     </td>
-                                                    <td className="py-2.5 px-3">
+                                                    <td className="py-2.5 px-2.5 whitespace-nowrap">
                                                         <span
                                                             className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${q.is_active
                                                                 ? 'bg-emerald-900/40 text-emerald-300'
@@ -1108,31 +1204,262 @@ export const AdminLogsModal: React.FC<AdminLogsModalProps> = ({
                                                             {q.is_active ? 'Ativa' : 'Inativa'}
                                                         </span>
                                                     </td>
-                                                    <td className="py-2.5 px-3 text-right space-x-1.5 whitespace-nowrap">
+                                                    <td className="py-2.5 px-3 text-right whitespace-nowrap">
+                                                        <div className="inline-flex items-center justify-end gap-1.5">
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => handleEditQuestion(q)}
+                                                                className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-indigo-300 rounded font-medium cursor-pointer"
+                                                            >
+                                                                Editar
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => handleToggleQuestionActive(q)}
+                                                                className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-amber-300 rounded font-medium cursor-pointer"
+                                                            >
+                                                                {q.is_active ? 'Desativar' : 'Ativar'}
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => handleDeleteQuestion(q)}
+                                                                className="px-2.5 py-1 bg-rose-950/60 hover:bg-rose-900/60 text-rose-300 rounded font-medium cursor-pointer"
+                                                            >
+                                                                Excluir
+                                                            </button>
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {activeTab === 'notifications' && (
+                        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+                            <div className="lg:col-span-5 space-y-4">
+                                <form
+                                    onSubmit={handleSendNotification}
+                                    className="bg-slate-950/70 border border-slate-800 rounded-xl p-4 space-y-3"
+                                >
+                                    <h3 className="text-sm font-bold text-white">
+                                        Publicar Notificação / Comunicado no Sistema
+                                    </h3>
+
+                                    <div>
+                                        <label className="block text-[11px] text-slate-400 mb-1">
+                                            Título da Notificação *
+                                        </label>
+                                        <input
+                                            type="text"
+                                            required
+                                            value={notifTitle}
+                                            onChange={(e) => setNotifTitle(e.target.value)}
+                                            placeholder="Ex: Novo simulado 3D de Crânio disponível!"
+                                            className="w-full px-3 py-1.5 text-xs bg-slate-900 border border-slate-700 rounded-lg text-white"
+                                        />
+                                    </div>
+
+                                    <div className="grid grid-cols-2 gap-2.5">
+                                        <div>
+                                            <label className="block text-[11px] text-slate-400 mb-1">
+                                                Categoria
+                                            </label>
+                                            <select
+                                                value={notifCategory}
+                                                onChange={(e) =>
+                                                    setNotifCategory(
+                                                        e.target.value as 'INFO' | 'ESTUDO' | 'ALERTA' | 'MANUTENCAO'
+                                                    )
+                                                }
+                                                className="w-full px-3 py-1.5 text-xs bg-slate-900 border border-slate-700 rounded-lg text-white"
+                                            >
+                                                <option value="INFO">Comunicado Geral</option>
+                                                <option value="ESTUDO">Incentivo / Dica de Estudo</option>
+                                                <option value="ALERTA">Aviso Importante</option>
+                                                <option value="MANUTENCAO">Manutenção / Sistema</option>
+                                            </select>
+                                        </div>
+
+                                        <div>
+                                            <label className="block text-[11px] text-slate-400 mb-1">
+                                                Público Destinatário
+                                            </label>
+                                            <select
+                                                value={notifAudience}
+                                                onChange={(e) =>
+                                                    setNotifAudience(e.target.value as 'ALL' | 'USER')
+                                                }
+                                                className="w-full px-3 py-1.5 text-xs bg-slate-900 border border-slate-700 rounded-lg text-white"
+                                            >
+                                                <option value="ALL">Todos os Estudantes</option>
+                                                <option value="USER">Estudante Específico (E-mail)</option>
+                                            </select>
+                                        </div>
+                                    </div>
+
+                                    {notifAudience === 'USER' && (
+                                        <div>
+                                            <label className="block text-[11px] text-slate-400 mb-1">
+                                                E-mail do Estudante *
+                                            </label>
+                                            <input
+                                                type="email"
+                                                required
+                                                value={notifTargetEmail}
+                                                onChange={(e) => setNotifTargetEmail(e.target.value)}
+                                                placeholder="estudante@exemplo.com"
+                                                className="w-full px-3 py-1.5 text-xs bg-slate-900 border border-slate-700 rounded-lg text-white"
+                                            />
+                                        </div>
+                                    )}
+
+                                    <div>
+                                        <label className="block text-[11px] text-slate-400 mb-1">
+                                            Mensagem do Comunicado *
+                                        </label>
+                                        <textarea
+                                            rows={3}
+                                            required
+                                            value={notifMessage}
+                                            onChange={(e) => setNotifMessage(e.target.value)}
+                                            placeholder="Escreva a mensagem que aparecerá no ícone de sino dos estudantes..."
+                                            className="w-full px-3 py-1.5 text-xs bg-slate-900 border border-slate-700 rounded-lg text-white"
+                                        />
+                                    </div>
+
+                                    <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer pt-1">
+                                        <input
+                                            type="checkbox"
+                                            checked={notifSendEmail}
+                                            onChange={(e) => setNotifSendEmail(e.target.checked)}
+                                            className="rounded border-slate-600 bg-slate-900 text-indigo-600"
+                                        />
+                                        <span>Disparar também uma cópia por E-mail aos destinatários</span>
+                                    </label>
+
+                                    <button
+                                        type="submit"
+                                        className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-lg transition-colors cursor-pointer"
+                                    >
+                                        Publicar Notificação no OsteoLearn
+                                    </button>
+                                </form>
+
+                                <div className="bg-amber-950/30 border border-amber-700/40 rounded-xl p-4 space-y-3">
+                                    <div>
+                                        <h4 className="text-xs font-bold text-amber-300 uppercase tracking-wider">
+                                            Canal Externo de Contingência (Caso o App/API Caia)
+                                        </h4>
+                                        <p className="text-[11px] text-slate-300 mt-1 leading-relaxed">
+                                            Se o servidor principal estiver em manutenção ou fora do ar, você pode enviar avisos diretamente por fora via Webhook HTTPS do Google Apps Script ou pelo terminal PowerShell:
+                                        </p>
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-[11px] text-amber-200/80 mb-1">
+                                            E-mails para disparo externo (separados por vírgula)
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={contingencyEmails}
+                                            onChange={(e) => setContingencyEmails(e.target.value)}
+                                            placeholder="aluno1@email.com, aluno2@email.com"
+                                            className="w-full px-3 py-1.5 text-xs bg-slate-950 border border-amber-700/40 rounded-lg text-white"
+                                        />
+                                    </div>
+
+                                    <button
+                                        type="button"
+                                        onClick={handleDispatchContingencyExternal}
+                                        className="w-full py-2 bg-amber-600 hover:bg-amber-500 text-slate-950 text-xs font-bold rounded-lg transition-colors cursor-pointer"
+                                    >
+                                        Disparar E-mail Direto por Fora da API (HTTPS Relay)
+                                    </button>
+
+                                    <div className="pt-2 border-t border-amber-800/40 space-y-1.5">
+                                        <div className="flex items-center justify-between">
+                                            <span className="text-[11px] font-semibold text-amber-200">
+                                                Comando Externo PowerShell (Funciona com o site offline):
+                                            </span>
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    navigator.clipboard.writeText(externalPowerShellCommand);
+                                                    setCopiedCmd(true);
+                                                    setTimeout(() => setCopiedCmd(false), 2500);
+                                                }}
+                                                className="px-2 py-0.5 text-[11px] bg-slate-800 hover:bg-slate-700 text-amber-300 rounded cursor-pointer"
+                                            >
+                                                {copiedCmd ? 'Copiado!' : 'Copiar Comando'}
+                                            </button>
+                                        </div>
+                                        <pre className="p-2.5 rounded-lg bg-slate-950 border border-slate-800 text-[10px] text-slate-300 font-mono overflow-x-auto whitespace-pre-wrap break-all">
+                                            {externalPowerShellCommand}
+                                        </pre>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="lg:col-span-7 space-y-3 min-w-0">
+                                <h3 className="text-sm font-bold text-white">
+                                    Histórico de Notificações e Boas-Vindas ({adminNotifications.length})
+                                </h3>
+                                <div className="border border-slate-800 rounded-xl overflow-x-auto max-h-[580px] overflow-y-auto">
+                                    <table className="w-full text-left text-xs">
+                                        <thead className="bg-slate-950 text-slate-400 uppercase border-b border-slate-800">
+                                            <tr>
+                                                <th className="py-2.5 px-3">Título / Mensagem</th>
+                                                <th className="py-2.5 px-2.5">Categoria</th>
+                                                <th className="py-2.5 px-2.5">Destinatário</th>
+                                                <th className="py-2.5 px-2.5">Data/Hora</th>
+                                                <th className="py-2.5 px-3 text-right">Ações</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-slate-800/60">
+                                            {adminNotifications.map((n) => (
+                                                <tr key={n.id} className="hover:bg-slate-800/30">
+                                                    <td className="py-2.5 px-3 max-w-[280px]">
+                                                        <div className="font-semibold text-white">{n.title}</div>
+                                                        <div className="text-slate-400 text-[11px] line-clamp-2">
+                                                            {n.message}
+                                                        </div>
+                                                    </td>
+                                                    <td className="py-2.5 px-2.5 whitespace-nowrap">
+                                                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-900/40 text-indigo-300 border border-indigo-700/40">
+                                                            {n.category}
+                                                        </span>
+                                                    </td>
+                                                    <td className="py-2.5 px-2.5 text-slate-300 text-[11px]">
+                                                        <div>{n.audience === 'ALL' ? 'Todos os estudantes' : n.target_email}</div>
+                                                        <div className="text-slate-500 text-[10px]">
+                                                            {n.read_count} leitura(s){n.sent_email ? ' · E-mail enviado' : ''}
+                                                        </div>
+                                                    </td>
+                                                    <td className="py-2.5 px-2.5 text-slate-400 whitespace-nowrap text-[11px]">
+                                                        {n.created_at}
+                                                    </td>
+                                                    <td className="py-2.5 px-3 text-right whitespace-nowrap">
                                                         <button
                                                             type="button"
-                                                            onClick={() => handleEditQuestion(q)}
-                                                            className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-indigo-300 rounded cursor-pointer"
-                                                        >
-                                                            Editar
-                                                        </button>
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => handleToggleQuestionActive(q)}
-                                                            className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-amber-300 rounded cursor-pointer"
-                                                        >
-                                                            {q.is_active ? 'Desativar' : 'Ativar'}
-                                                        </button>
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => handleDeleteQuestion(q)}
-                                                            className="px-2 py-1 bg-rose-950/60 hover:bg-rose-900/60 text-rose-300 rounded cursor-pointer"
+                                                            onClick={() => handleDeleteNotification(n.id)}
+                                                            className="px-2.5 py-1 bg-rose-950/60 hover:bg-rose-900/60 text-rose-300 rounded font-medium cursor-pointer"
                                                         >
                                                             Excluir
                                                         </button>
                                                     </td>
                                                 </tr>
                                             ))}
+                                            {adminNotifications.length === 0 && (
+                                                <tr>
+                                                    <td colSpan={5} className="py-8 text-center text-slate-500">
+                                                        Nenhuma notificação registrada até o momento.
+                                                    </td>
+                                                </tr>
+                                            )}
                                         </tbody>
                                     </table>
                                 </div>

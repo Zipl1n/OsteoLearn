@@ -177,6 +177,67 @@ def send_password_reset_email(user, code):
     return dispatch_email_with_https_fallback(user.email, assunto, mensagem, html_mensagem)
 
 
+def ensure_welcome_notification(user):
+    if not user or not getattr(user, 'id', None):
+        return
+    existing = AuditLog.objects.filter(
+        user=user,
+        action='NOTIFICATION_SENT',
+        details__category='WELCOME',
+    ).exists()
+    if existing:
+        return
+    first_name = user.name.strip().split(' ')[0] if user.name and user.name.strip() else 'Estudante'
+    AuditLog.objects.create(
+        user=user,
+        action='NOTIFICATION_SENT',
+        details={
+            'is_notification': True,
+            'title': f'Bem-vindo(a) ao OsteoLearn, {first_name}!',
+            'message': (
+                'É um grande prazer ter você conosco! Explore o Atlas 3D Interativo em 360°, '
+                'consulte o Guia Clínico de Patologias e desafie seus conhecimentos na Prova da '
+                'Alfinetada para dominar a osteologia humana.'
+            ),
+            'category': 'WELCOME',
+            'audience': 'USER',
+            'target_email': user.email,
+            'author_name': 'Equipe OsteoLearn',
+            'read_by': [],
+            'sent_email': False,
+        },
+    )
+
+
+def send_notification_email(recipient_email, recipient_name, title, message):
+    safe_name = recipient_name.strip() if recipient_name and recipient_name.strip() else 'Estudante'
+    assunto = f"OsteoLearn - {title}"
+    corpo_texto = (
+        f"Olá, {safe_name}!\n\n"
+        f"{title}\n\n"
+        f"{message}\n\n"
+        f"Acesse a plataforma OsteoLearn: https://osteo-learn.vercel.app"
+    )
+    container_style = (
+        "font-family: Arial, sans-serif; max-width: 540px; margin: 28px auto; "
+        "padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; color: #1e293b; line-height: 1.6;"
+    )
+    html_mensagem = f"""
+    <div style="{container_style}">
+        <p style="font-size: 12px; font-weight: bold; color: #2E482C; text-transform: uppercase; margin: 0 0 8px 0;">
+            Comunicado Oficial OsteoLearn
+        </p>
+        <h2 style="margin: 0 0 14px 0; font-size: 19px; color: #0f172a;">{title}</h2>
+        <p style="margin: 0 0 14px 0;">Olá, <strong>{safe_name}</strong>!</p>
+        <p style="margin: 0 0 20px 0; white-space: pre-line;">{message}</p>
+        <p style="margin: 0; font-size: 12px; color: #64748b;">
+            Plataforma Interativa de Aprendizado em Osteologia Humana 3D - https://osteo-learn.vercel.app
+        </p>
+    </div>
+    """
+    return dispatch_email_with_https_fallback(recipient_email, assunto, corpo_texto, html_mensagem)
+
+
 def update_user_study_streak(user, activity_name=None, progress=None):
     today = timezone.localdate()
     if user.last_study_date is None:
@@ -273,6 +334,7 @@ class RegisterView(APIView):
                 user_agent=user_agent,
                 details={'method': 'email'}
             )
+            ensure_welcome_notification(user)
 
             msg = (
                 'Conta criada! Enviamos um código de verificação para o seu e-mail.'
@@ -319,6 +381,7 @@ class LoginView(APIView):
                 user_agent=user_agent,
                 details={'method': 'email'}
             )
+            ensure_welcome_notification(user)
 
             msg = (
                 'Código de autenticação enviado para seu e-mail.'
@@ -705,6 +768,7 @@ class DashboardStatsView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
+        ensure_welcome_notification(request.user)
         stats = build_user_dashboard_stats(request.user)
         return Response(stats, status=status.HTTP_200_OK)
 
@@ -1445,3 +1509,185 @@ class AdminQuestionDetailView(APIView):
 
         q.delete()
         return Response({'message': 'Questão removida com sucesso.'}, status=status.HTTP_200_OK)
+
+
+def serialize_notification_log(log, current_user=None):
+    details = log.details if isinstance(log.details, dict) else {}
+    read_by = details.get('read_by') if isinstance(details.get('read_by'), list) else []
+    user_email_lower = current_user.email.lower() if current_user and getattr(current_user, 'email', None) else ''
+    is_read = user_email_lower in [str(e).lower() for e in read_by] if user_email_lower else False
+    return {
+        'id': log.id,
+        'title': details.get('title') or 'Comunicado OsteoLearn',
+        'message': details.get('message') or '',
+        'category': details.get('category') or 'INFO',
+        'audience': details.get('audience') or 'ALL',
+        'target_email': details.get('target_email') or '',
+        'author_name': details.get('author_name') or 'Administração OsteoLearn',
+        'sent_email': bool(details.get('sent_email', False)),
+        'read_count': len(read_by),
+        'is_read': is_read,
+        'created_at': log.timestamp.strftime('%d/%m/%Y %H:%M'),
+    }
+
+
+class UserNotificationsView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        ensure_welcome_notification(request.user)
+        user_email = (request.user.email or '').strip().lower()
+        logs = list(
+            AuditLog.objects.filter(action='NOTIFICATION_SENT').order_by('-timestamp')[:100]
+        )
+        items = []
+        unread_count = 0
+        for log in logs:
+            details = log.details if isinstance(log.details, dict) else {}
+            audience = str(details.get('audience') or 'ALL').upper()
+            target_email = str(details.get('target_email') or '').strip().lower()
+            is_for_user = (
+                audience == 'ALL'
+                or log.user_id == request.user.id
+                or (target_email and target_email == user_email)
+            )
+            if not is_for_user:
+                continue
+            serialized = serialize_notification_log(log, request.user)
+            if not serialized['is_read']:
+                unread_count += 1
+            items.append(serialized)
+
+        return Response(
+            {'notifications': items, 'unread_count': unread_count},
+            status=status.HTTP_200_OK,
+        )
+
+
+class UserNotificationsReadView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        notification_id = request.data.get('notification_id')
+        mark_all = bool(request.data.get('mark_all', False))
+        user_email = (request.user.email or '').strip().lower()
+        if not user_email:
+            return Response({'error': 'Usuário inválido.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        qs = AuditLog.objects.filter(action='NOTIFICATION_SENT')
+        if notification_id and not mark_all:
+            qs = qs.filter(pk=notification_id)
+
+        for log in qs:
+            details = dict(log.details) if isinstance(log.details, dict) else {}
+            read_by = list(details.get('read_by')) if isinstance(details.get('read_by'), list) else []
+            normalized = [str(e).lower() for e in read_by]
+            if user_email not in normalized:
+                read_by.append(user_email)
+                details['read_by'] = read_by
+                log.details = details
+                log.save(update_fields=['details'])
+
+        return Response({'message': 'Notificações marcadas como lidas.'}, status=status.HTTP_200_OK)
+
+
+class AdminNotificationsManageView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        if not getattr(request.user, 'is_admin', False):
+            return Response({'error': 'Acesso restrito a administradores.'}, status=status.HTTP_403_FORBIDDEN)
+
+        logs = list(
+            AuditLog.objects.filter(action='NOTIFICATION_SENT').order_by('-timestamp')[:100]
+        )
+        items = [serialize_notification_log(log, request.user) for log in logs]
+        return Response({'notifications': items, 'total': len(items)}, status=status.HTTP_200_OK)
+
+    def post(self, request):
+        if not getattr(request.user, 'is_admin', False):
+            return Response({'error': 'Acesso restrito a administradores.'}, status=status.HTTP_403_FORBIDDEN)
+
+        title = str(request.data.get('title', '')).strip()
+        message = str(request.data.get('message', '')).strip()
+        category = str(request.data.get('category', 'INFO')).strip().upper()
+        audience = str(request.data.get('audience', 'ALL')).strip().upper()
+        target_email = str(request.data.get('target_email', '')).strip()
+        send_email_flag = bool(request.data.get('send_email', False))
+
+        if not title or not message:
+            return Response(
+                {'error': 'Título e mensagem da notificação são obrigatórios.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if category not in ('INFO', 'ESTUDO', 'ALERTA', 'MANUTENCAO', 'WELCOME'):
+            category = 'INFO'
+        if audience not in ('ALL', 'USER'):
+            audience = 'ALL'
+
+        target_user = None
+        if audience == 'USER':
+            if not target_email:
+                return Response(
+                    {'error': 'Informe o e-mail do estudante destinatário.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            target_user = User.objects.filter(email__iexact=target_email).first()
+
+        author_name = request.user.name.strip() if request.user.name and request.user.name.strip() else 'Administrador'
+        email_dispatched_count = 0
+
+        if send_email_flag:
+            if audience == 'USER' and target_email:
+                recipient_name = target_user.name if target_user else 'Estudante'
+                if send_notification_email(target_email, recipient_name, title, message):
+                    email_dispatched_count = 1
+            else:
+                for u in User.objects.filter(is_active=True)[:50]:
+                    if u.email and send_notification_email(u.email, u.name, title, message):
+                        email_dispatched_count += 1
+
+        log = AuditLog.objects.create(
+            user=target_user,
+            action='NOTIFICATION_SENT',
+            ip_address=get_client_ip(request),
+            user_agent=request.META.get('HTTP_USER_AGENT', ''),
+            details={
+                'is_notification': True,
+                'title': title,
+                'message': message,
+                'category': category,
+                'audience': audience,
+                'target_email': target_email if audience == 'USER' else 'Todos os estudantes',
+                'author_name': author_name,
+                'read_by': [],
+                'sent_email': send_email_flag,
+                'email_dispatched_count': email_dispatched_count,
+            },
+        )
+
+        return Response(
+            {
+                'notification': serialize_notification_log(log, request.user),
+                'email_dispatched_count': email_dispatched_count,
+                'message': 'Notificação publicada com sucesso!',
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class AdminNotificationDetailView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def delete(self, request, pk):
+        if not getattr(request.user, 'is_admin', False):
+            return Response({'error': 'Acesso restrito a administradores.'}, status=status.HTTP_403_FORBIDDEN)
+
+        log = AuditLog.objects.filter(pk=pk, action='NOTIFICATION_SENT').first()
+        if not log:
+            return Response({'error': 'Notificação não encontrada.'}, status=status.HTTP_404_NOT_FOUND)
+
+        log.delete()
+        return Response({'message': 'Notificação excluída com sucesso.'}, status=status.HTTP_200_OK)
+
