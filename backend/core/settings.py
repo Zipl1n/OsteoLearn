@@ -131,6 +131,7 @@ EMAIL_TIMEOUT = int(os.getenv('EMAIL_TIMEOUT', '4'))
 EMAIL_HOST_USER = (os.getenv('EMAIL_HOST_USER') or '').strip()
 EMAIL_HOST_PASSWORD = (os.getenv('EMAIL_HOST_PASSWORD') or '').strip()
 DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'OsteoLearn <noreply@osteolearn.local>')
+GMAIL_WEBHOOK_URL = (os.getenv('GMAIL_WEBHOOK_URL') or '').strip()
 
 AUTH_USER_MODEL = 'accounts.User'
 
@@ -150,6 +151,9 @@ CSRF_TRUSTED_ORIGINS = [
 ]
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 ACCOUNT_DEFAULT_HTTP_PROTOCOL = 'https' if not DEBUG else 'http'
+SESSION_ENGINE = 'django.contrib.sessions.backends.signed_cookies'
+SESSION_COOKIE_SAMESITE = 'Lax'
+SESSION_COOKIE_SECURE = not DEBUG
 
 LOGIN_REDIRECT_URL = os.getenv('LOGIN_REDIRECT_URL', FRONTEND_URL or '/')
 

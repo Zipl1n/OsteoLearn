@@ -4,6 +4,8 @@ from .views import (
     AdminAuditLogsView,
     AdminBoneDetailView,
     AdminBonesManageView,
+    AdminNotificationDetailView,
+    AdminNotificationsManageView,
     AdminQuestionDetailView,
     AdminQuestionsManageView,
     AtlasBonesView,
@@ -24,6 +26,8 @@ from .views import (
     RegisterView,
     TwoFactorResendView,
     TwoFactorVerifyView,
+    UserNotificationsReadView,
+    UserNotificationsView,
 )
 
 urlpatterns = [
@@ -32,6 +36,10 @@ urlpatterns = [
     path('admin/bones/<int:pk>/', AdminBoneDetailView.as_view(), name='admin-bone-detail'),
     path('admin/questions/', AdminQuestionsManageView.as_view(), name='admin-questions-manage'),
     path('admin/questions/<int:pk>/', AdminQuestionDetailView.as_view(), name='admin-question-detail'),
+    path('admin/notifications/', AdminNotificationsManageView.as_view(), name='admin-notifications-manage'),
+    path('admin/notifications/<int:pk>/', AdminNotificationDetailView.as_view(), name='admin-notification-detail'),
+    path('notifications/', UserNotificationsView.as_view(), name='user-notifications'),
+    path('notifications/read/', UserNotificationsReadView.as_view(), name='user-notifications-read'),
     path('dashboard/stats/', DashboardStatsView.as_view(), name='dashboard-stats'),
     path('dashboard/study-bone/', RecordBoneStudyView.as_view(), name='dashboard-study-bone'),
     path('quiz/questions/', QuizQuestionsView.as_view(), name='quiz-questions'),

@@ -1,14 +1,20 @@
+import json
 import os
-from allauth.account.adapter import DefaultAccountAdapter
-from allauth.socialaccount.adapter import DefaultSocialAccountAdapter
-from rest_framework_simplejwt.tokens import RefreshToken
 from urllib.parse import urlencode
+from allauth.account.adapter import DefaultAccountAdapter
+from allauth.core.exceptions import ImmediateHttpResponse
+from allauth.socialaccount.adapter import DefaultSocialAccountAdapter
 from django.conf import settings
-from .models import User, AuditLog
+from django.http import HttpResponseRedirect
+from rest_framework_simplejwt.tokens import RefreshToken
+from .models import AuditLog, User
+from .serializers import UserSerializer
 
 
 def build_jwt_redirect_url(user, request):
+    from .views import ensure_welcome_notification
     refresh = RefreshToken.for_user(user)
+    ensure_welcome_notification(user)
 
     x_forwarded = request.META.get('HTTP_X_FORWARDED_FOR')
     ip = x_forwarded.split(',')[0].strip() if x_forwarded else request.META.get('REMOTE_ADDR')
@@ -20,9 +26,11 @@ def build_jwt_redirect_url(user, request):
         details={'method': 'google_oauth'}
     )
 
+    user_payload = json.dumps(UserSerializer(user).data)
     query = urlencode({
         'token': str(refresh.access_token),
         'refresh': str(refresh),
+        'user': user_payload,
     })
     frontend_url = getattr(settings, 'FRONTEND_URL', '') or os.getenv('FRONTEND_URL', '/')
     frontend_url = frontend_url.rstrip('/')
@@ -49,6 +57,20 @@ class CustomSocialAccountAdapter(DefaultSocialAccountAdapter):
 
     def get_signup_redirect_url(self, request):
         return build_jwt_redirect_url(request.user, request)
+
+    def on_authentication_error(
+        self,
+        request,
+        provider,
+        error=None,
+        exception=None,
+        extra_context=None,
+    ):
+        if getattr(request, 'user', None) and request.user.is_authenticated:
+            raise ImmediateHttpResponse(HttpResponseRedirect(build_jwt_redirect_url(request.user, request)))
+        frontend_url = getattr(settings, 'FRONTEND_URL', '') or os.getenv('FRONTEND_URL', '/')
+        frontend_url = frontend_url.rstrip('/') or '/'
+        raise ImmediateHttpResponse(HttpResponseRedirect(frontend_url))
 
     def pre_social_login(self, request, sociallogin):
         if sociallogin.is_existing:

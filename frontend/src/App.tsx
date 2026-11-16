@@ -217,11 +217,29 @@ function AnatomicalBoneViewer({
 }
 
 export default function App() {
-  const { user, logout, exportMyData, deleteMyAccount } = useAuth();
+  const { user, loading, logout, exportMyData, deleteMyAccount } = useAuth();
 
-  const [currentPage, setCurrentPage] = useState<
-    'dashboard' | 'atlas-catalog' | 'atlas-viewer' | 'pathology-guide' | 'quiz'
+  const [currentPage, setCurrentPageState] = useState<
+    'dashboard' | 'atlas-catalog' | 'atlas-viewer' | 'pathology-guide' | 'quiz' | 'delete-account'
   >('dashboard');
+
+  const setCurrentPage = (
+    nextPage:
+      | 'dashboard'
+      | 'atlas-catalog'
+      | 'atlas-viewer'
+      | 'pathology-guide'
+      | 'quiz'
+      | 'delete-account',
+    pushToHistory = true
+  ) => {
+    setCurrentPageState((prev) => {
+      if (pushToHistory && prev !== nextPage) {
+        window.history.pushState({ osteoPage: nextPage }, '', window.location.pathname);
+      }
+      return nextPage;
+    });
+  };
   const [atlasBones, setAtlasBones] = useState<AtlasBone[]>(DEFAULT_ATLAS_BONES_FALLBACK);
   const [selectedBone, setSelectedBone] = useState<AtlasBone>(DEFAULT_ATLAS_BONES_FALLBACK[0]);
   const [focusedPathologyBone, setFocusedPathologyBone] = useState<AtlasBone | null>(null);
@@ -237,6 +255,7 @@ export default function App() {
   const [isPrivacyOpen, setIsPrivacyOpen] = useState(false);
   const [isCalibrating, setIsCalibrating] = useState(false);
   const [calibrationStatus, setCalibrationStatus] = useState<string>('');
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
 
   const handleCalibratePoint = async (newPos3D: [number, number, number]) => {
     const activeLandmark = selectedBone.landmarks.find((lm) => lm.order === selectedId);
@@ -368,10 +387,34 @@ export default function App() {
       setQuizStats(emptyStats);
       return;
     }
-    setCurrentPage('dashboard');
+    setCurrentPageState('dashboard');
+    window.history.replaceState({ osteoPage: 'dashboard' }, '', window.location.pathname);
+    window.history.pushState({ osteoPage: 'dashboard' }, '', window.location.pathname);
     getDashboardStats()
       .then((data) => applyServerStats(data))
       .catch(() => { });
+  }, [user?.email]);
+
+  useEffect(() => {
+    if (!user) return;
+    const handlePopState = (event: PopStateEvent) => {
+      const targetPage = event.state?.osteoPage;
+      if (
+        targetPage === 'dashboard' ||
+        targetPage === 'atlas-catalog' ||
+        targetPage === 'atlas-viewer' ||
+        targetPage === 'pathology-guide' ||
+        targetPage === 'quiz' ||
+        targetPage === 'delete-account'
+      ) {
+        setCurrentPageState(targetPage);
+      } else {
+        window.history.pushState({ osteoPage: 'dashboard' }, '', window.location.pathname);
+        setCurrentPageState('dashboard');
+      }
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
   }, [user?.email]);
 
   const controlsRef = useRef<OrbitControlsImpl | null>(null);
@@ -480,6 +523,17 @@ export default function App() {
       .then((data) => applyServerStats(data))
       .catch(() => { });
   };
+
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center h-screen w-screen bg-gradient-to-br from-[#1E331C] via-[#2E482C] to-[#121E11] text-white gap-4 font-sans select-none">
+        <div className="w-12 h-12 rounded-2xl bg-white/10 border border-white/20 flex items-center justify-center animate-pulse shadow-inner">
+          <Bone className="w-6 h-6 text-[#E7DFC6]" />
+        </div>
+        <p className="text-sm font-medium text-stone-200 tracking-wide">Carregando sua sessão no OsteoLearn...</p>
+      </div>
+    );
+  }
 
   if (!user) {
     return <LoginPage />;
@@ -666,11 +720,9 @@ export default function App() {
               </button>
 
               <button
-                onClick={async () => {
+                onClick={() => {
                   setIsSettingsOpen(false);
-                  if (window.confirm("ATENÇÃO: Tem certeza que deseja excluir sua conta definitivamente? Todos os seus dados e progresso serão apagados.")) {
-                    await deleteMyAccount();
-                  }
+                  setCurrentPage('delete-account');
                 }}
                 className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-red-500/20 text-red-300 hover:text-red-200 transition-colors cursor-pointer text-left"
               >
@@ -759,6 +811,61 @@ export default function App() {
           onSelectRegion={setSelectedRegion}
           onSelectBone={handleOpenBoneViewer}
         />
+      )}
+
+      {currentPage === 'delete-account' && (
+        <div className="flex-1 flex items-center justify-center p-6 bg-stone-50 overflow-y-auto">
+          <div className="w-full max-w-lg bg-white rounded-3xl border border-stone-200 shadow-xl p-8 flex flex-col gap-6">
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 rounded-2xl bg-red-50 border border-red-100 flex items-center justify-center flex-shrink-0">
+                <AlertTriangle className="w-6 h-6 text-red-600" />
+              </div>
+              <div>
+                <h2 className="text-xl font-serif font-bold text-slate-900">
+                  Excluir Minha Conta
+                </h2>
+                <p className="text-xs text-slate-500">
+                  Direito à eliminação de dados pessoais (Art. 18 da LGPD)
+                </p>
+              </div>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-red-50/80 border border-red-200 text-red-900 text-sm leading-relaxed">
+              <strong>ATENÇÃO:</strong> Tem certeza que deseja excluir sua conta definitivamente? Todos os seus dados e progresso serão apagados.
+            </div>
+
+            <p className="text-xs text-slate-600 leading-relaxed">
+              Ao confirmar, sua conta associada ao e-mail <strong>{user.email}</strong>, bem como seu histórico de estudos no Atlas 3D e suas notas na Prova da Alfinetada, serão removidos de forma permanente e irreversível do sistema.
+            </p>
+
+            <div className="flex items-center justify-end gap-3 pt-2 border-t border-stone-100">
+              <button
+                type="button"
+                disabled={isDeletingAccount}
+                onClick={() => setCurrentPage('dashboard')}
+                className="px-5 py-2.5 rounded-xl bg-stone-200 hover:bg-stone-300 text-slate-800 text-xs font-semibold transition-colors cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={isDeletingAccount}
+                onClick={async () => {
+                  setIsDeletingAccount(true);
+                  try {
+                    await deleteMyAccount();
+                  } finally {
+                    setIsDeletingAccount(false);
+                  }
+                }}
+                className="px-5 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-bold flex items-center gap-2 transition-colors cursor-pointer shadow-sm"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>{isDeletingAccount ? 'Excluindo conta...' : 'Excluir Minha Conta'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {currentPage === 'atlas-viewer' && (

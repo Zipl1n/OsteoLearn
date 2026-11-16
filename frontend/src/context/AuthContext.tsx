@@ -44,18 +44,34 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             const params = new URLSearchParams(window.location.search);
             const urlToken = params.get('token');
             const urlRefresh = params.get('refresh');
+            const urlUser = params.get('user');
 
             if (urlToken) {
                 localStorage.setItem('@OsteoLearn:token', urlToken);
                 if (urlRefresh) localStorage.setItem('@OsteoLearn:refresh', urlRefresh);
-                window.history.replaceState({}, document.title, window.location.pathname);
+                window.history.replaceState({ osteoPage: 'dashboard' }, document.title, window.location.pathname);
+                if (urlUser) {
+                    try {
+                        const parsedUser = JSON.parse(urlUser);
+                        if (parsedUser && parsedUser.email) {
+                            setUser(parsedUser);
+                            setLoading(false);
+                            api.get('auth/me/')
+                                .then((res) => setUser(res.data))
+                                .catch(() => {});
+                            return;
+                        }
+                    } catch {
+                        setUser(null);
+                    }
+                }
             }
             const storedToken = localStorage.getItem('@OsteoLearn:token');
             if (storedToken) {
                 try {
                     const response = await api.get('auth/me/');
                     setUser(response.data);
-                } catch (err) {
+                } catch {
                     localStorage.removeItem('@OsteoLearn:token');
                     localStorage.removeItem('@OsteoLearn:refresh');
                 }
