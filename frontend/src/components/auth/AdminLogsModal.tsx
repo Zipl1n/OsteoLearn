@@ -574,10 +574,10 @@ export const AdminLogsModal: React.FC<AdminLogsModalProps> = ({
 
                     <div className="p-3 rounded-xl bg-slate-950/80 border border-slate-800 flex flex-col">
                         <span className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold">
-                            Banco e Avaliações (RF24)
+                            Banco de Questões
                         </span>
                         <span className="text-xl font-bold text-cyan-300">
-                            {summary.total_questions} questões · {summary.total_quiz_attempts ?? 0} provas ({summary.global_avg_accuracy ?? 0}%)
+                            {summary.total_questions} questões
                         </span>
                     </div>
                 </div>
