@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import {
     createAdminBone,
+    createAdminLGPDVersion,
     createAdminNotification,
     createAdminQuestion,
     deleteAdminBone,
@@ -9,12 +10,15 @@ import {
     dispatchExternalContingencyEmail,
     EXTERNAL_GAS_WEBHOOK_URL,
     getAdminBones,
+    getAdminLGPDVersions,
     getAdminLogs,
     getAdminNotifications,
     getAdminQuestions,
+    maskEmailAddress,
     updateAdminBone,
     updateAdminQuestion,
     type AppNotificationItem,
+    type LGPDVersionItem,
 } from '../../services/api';
 
 interface LogItem {
@@ -38,6 +42,20 @@ interface AdminSummary {
     total_events: number;
     total_quiz_attempts?: number;
     global_avg_accuracy?: number;
+    pedagogical_efficacy?: {
+        withAtlasAvg: number;
+        withoutAtlasAvg: number;
+        atlasAdvantagePct: number;
+        withAtlasAttemptsCount: number;
+        withoutAtlasAttemptsCount: number;
+        firstAttemptAvg: number;
+        postReviewAvg: number;
+        learningGainPct: number;
+        retestedBonesCount: number;
+        improvedBonesCount: number;
+        bonesStudiedIn3DCount: number;
+        totalEvaluatedAttempts: number;
+    };
 }
 
 interface AdminLandmarkItem {
@@ -92,9 +110,19 @@ export const AdminLogsModal: React.FC<AdminLogsModalProps> = ({
     onClose,
     onCatalogUpdated,
 }) => {
-    const [activeTab, setActiveTab] = useState<'models' | 'questions' | 'notifications' | 'logs'>('models');
+    const [activeTab, setActiveTab] = useState<'models' | 'questions' | 'notifications' | 'lgpd' | 'logs'>('models');
     const [logs, setLogs] = useState<LogItem[]>([]);
     const [adminNotifications, setAdminNotifications] = useState<AppNotificationItem[]>([]);
+    const [lgpdVersions, setLgpdVersions] = useState<LGPDVersionItem[]>([]);
+    const [lgpdVersionNumber, setLgpdVersionNumber] = useState('1.1');
+    const [lgpdChangelog, setLgpdChangelog] = useState('');
+    const [lgpdTermsContent, setLgpdTermsContent] = useState(
+        '1. Finalidade Educacional e Acadêmica: A plataforma OsteoLearn é um ambiente virtual interativo de aprendizagem voltado ao estudo de Osteologia Humana 3D, Guia Clínico de Patologias Ósseas e Avaliação Prática (Prova da Alfinetada).\n\n2. Responsabilidade sobre Credenciais: O estudante compromete-se a manter o sigilo de sua senha e dos códigos 2FA.\n\n3. Propriedade Intelectual: Os modelos tridimensionais (.glb) e bancos de questões destinam-se exclusivamente ao uso didático.\n\n4. Mensuração de Desempenho e Eficácia Pedagógica 3D: O sistema registra as peças exploradas no Atlas 3D e o histórico de pontuação nos quizzes para gerar indicadores individuais de evolução e métricas estatísticas agregadas de eficácia pedagógica.'
+    );
+    const [lgpdPrivacyContent, setLgpdPrivacyContent] = useState(
+        '1. Dados Coletados (Lei nº 13.709/2018 - LGPD): Coletamos nome, e-mail, registro de consentimento (versão, data/hora e IP) e progresso pedagógico.\n\n2. Tratamento Estatístico Anonimizado para Pesquisa Acadêmica (Art. 7º, IV da LGPD): Os registros de estudo prévio no Atlas 3D e as taxas de acerto nos quizzes (Com Estudo 3D vs. Sem Estudo 3D e evolução 1ª Tentativa vs. Pós-Revisão) são processados de forma estritamente agregada e anonimizada para comprovação científica da eficácia pedagógica da plataforma, sem identificar individualmente nenhum estudante.\n\n3. Segurança e Mascaramento: Senhas protegidas com PBKDF2 SHA-256, códigos 2FA em SHA-256 e e-mails mascarados com asteriscos (ex: mat******sb@gmail.com) nos logs de auditoria.\n\n4. Direitos do Titular (Art. 18 LGPD): Exportação integral em JSON e exclusão definitiva de conta disponíveis a qualquer momento.'
+    );
+    const [lgpdRequireReconsent, setLgpdRequireReconsent] = useState(false);
     const [notifTitle, setNotifTitle] = useState('');
     const [notifMessage, setNotifMessage] = useState('');
     const [notifCategory, setNotifCategory] = useState<'INFO' | 'ESTUDO' | 'ALERTA' | 'MANUTENCAO'>('INFO');
@@ -154,11 +182,12 @@ export const AdminLogsModal: React.FC<AdminLogsModalProps> = ({
         setLoading(true);
         setError('');
         try {
-            const [logsData, bonesData, questionsData, notifsData] = await Promise.all([
+            const [logsData, bonesData, questionsData, notifsData, lgpdData] = await Promise.all([
                 getAdminLogs(),
                 getAdminBones(),
                 getAdminQuestions(),
                 getAdminNotifications().catch(() => ({ notifications: [], total: 0 })),
+                getAdminLGPDVersions().catch(() => ({ current: null, versions: [], total: 0 })),
             ]);
             setLogs(logsData.logs || []);
             if (logsData.summary) {
@@ -171,6 +200,9 @@ export const AdminLogsModal: React.FC<AdminLogsModalProps> = ({
             }
             setQuestions(questionsData.questions || []);
             setAdminNotifications(notifsData.notifications || []);
+            if (Array.isArray(lgpdData.versions)) {
+                setLgpdVersions(lgpdData.versions);
+            }
         } catch (err: any) {
             setError(err.response?.data?.error || 'Erro ao carregar os dados administrativos.');
         } finally {
@@ -488,6 +520,27 @@ export const AdminLogsModal: React.FC<AdminLogsModalProps> = ({
 
     const externalPowerShellCommand = `Invoke-RestMethod -Uri "${EXTERNAL_GAS_WEBHOOK_URL}" -Method Post -ContentType "application/json; charset=utf-8" -Body (@{ to = "${(contingencyEmails || notifTargetEmail || 'estudante@exemplo.com').trim()}"; subject = "OsteoLearn - ${(notifTitle || 'Aviso Importante').replace(/"/g, "'")}"; message = "${(notifMessage || 'Comunicado da equipe OsteoLearn.').replace(/"/g, "'").replace(/\r?\n/g, ' ')}" } | ConvertTo-Json)`;
 
+    const handlePublishLGPDVersion = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setError('');
+        setFeedbackMsg('');
+        try {
+            const res = await createAdminLGPDVersion({
+                version: lgpdVersionNumber.trim(),
+                terms_content: lgpdTermsContent.trim(),
+                privacy_content: lgpdPrivacyContent.trim(),
+                changelog: lgpdChangelog.trim() || `Atualização institucional v${lgpdVersionNumber.trim()}`,
+                require_reconsent: lgpdRequireReconsent,
+            });
+            setFeedbackMsg(res.message || 'Nova versão dos Termos e Política de Privacidade publicada!');
+            setLgpdChangelog('');
+            setLgpdRequireReconsent(false);
+            await fetchAllAdminData();
+        } catch (err: any) {
+            setError(err.response?.data?.error || 'Erro ao publicar nova versão LGPD.');
+        }
+    };
+
     const selectedQuestionBone = bones.find((b) => b.id === questionBoneId);
 
     const filteredLogs = logs.filter(
@@ -582,6 +635,53 @@ export const AdminLogsModal: React.FC<AdminLogsModalProps> = ({
                     </div>
                 </div>
 
+                {summary.pedagogical_efficacy && (
+                    <div className="px-6 py-3 bg-emerald-950/25 border-b border-slate-800 flex flex-wrap items-center justify-between gap-4">
+                        <div className="flex items-center gap-2.5">
+                            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                                Eficácia Pedagógica do Atlas 3D (Art. 7º, IV LGPD - Anonimizado)
+                            </span>
+                            <span className="text-xs text-slate-300">
+                                Com Estudo no Atlas 3D:{' '}
+                                <strong className="text-emerald-300">
+                                    {summary.pedagogical_efficacy.withAtlasAvg}%
+                                </strong>{' '}
+                                vs. Sem Estudo 3D:{' '}
+                                <strong className="text-amber-300">
+                                    {summary.pedagogical_efficacy.withoutAtlasAvg}%
+                                </strong>{' '}
+                                (Impacto:{' '}
+                                <strong className="text-emerald-400">
+                                    {summary.pedagogical_efficacy.atlasAdvantagePct >= 0
+                                        ? `+${summary.pedagogical_efficacy.atlasAdvantagePct}%`
+                                        : `${summary.pedagogical_efficacy.atlasAdvantagePct}%`}
+                                </strong>
+                                )
+                            </span>
+                        </div>
+
+                        <div className="text-xs text-slate-300 flex items-center gap-3">
+                            <span>
+                                1ª Tentativa:{' '}
+                                <strong className="text-slate-200">
+                                    {summary.pedagogical_efficacy.firstAttemptAvg}%
+                                </strong>{' '}
+                                → Pós-Revisão 3D:{' '}
+                                <strong className="text-emerald-300">
+                                    {summary.pedagogical_efficacy.postReviewAvg}%
+                                </strong>{' '}
+                                (Ganho:{' '}
+                                <strong className="text-emerald-400">
+                                    {summary.pedagogical_efficacy.learningGainPct >= 0
+                                        ? `+${summary.pedagogical_efficacy.learningGainPct}%`
+                                        : `${summary.pedagogical_efficacy.learningGainPct}%`}
+                                </strong>
+                                )
+                            </span>
+                        </div>
+                    </div>
+                )}
+
                 <div className="flex items-center justify-between px-6 py-3 bg-slate-950/40 border-b border-slate-800">
                     <div className="flex gap-2">
                         <button
@@ -613,6 +713,16 @@ export const AdminLogsModal: React.FC<AdminLogsModalProps> = ({
                                 }`}
                         >
                             Notificações e Avisos
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setActiveTab('lgpd')}
+                            className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors cursor-pointer ${activeTab === 'lgpd'
+                                ? 'bg-indigo-600 text-white'
+                                : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                                }`}
+                        >
+                            Termos e Privacidade (LGPD)
                         </button>
                         <button
                             type="button"
@@ -1467,6 +1577,159 @@ export const AdminLogsModal: React.FC<AdminLogsModalProps> = ({
                         </div>
                     )}
 
+                    {activeTab === 'lgpd' && (
+                        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+                            <form
+                                onSubmit={handlePublishLGPDVersion}
+                                className="lg:col-span-5 bg-slate-950/70 border border-slate-800 rounded-xl p-4 space-y-3"
+                            >
+                                <div className="flex items-center justify-between">
+                                    <h3 className="text-sm font-bold text-white">
+                                        Versionar Termos de Uso e Política de Privacidade
+                                    </h3>
+                                    <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-emerald-900/40 text-emerald-300 border border-emerald-700/40">
+                                        Vigente: v{lgpdVersions[0]?.version || '1.0'}
+                                    </span>
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-2.5">
+                                    <div>
+                                        <label className="block text-[11px] text-slate-400 mb-1">
+                                            Nova Versão *
+                                        </label>
+                                        <input
+                                            type="text"
+                                            required
+                                            value={lgpdVersionNumber}
+                                            onChange={(e) => setLgpdVersionNumber(e.target.value)}
+                                            placeholder="Ex: 1.1 ou 2.0"
+                                            className="w-full px-3 py-1.5 text-xs bg-slate-900 border border-slate-700 rounded-lg text-white"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-[11px] text-slate-400 mb-1">
+                                            Resumo da Alteração (Changelog) *
+                                        </label>
+                                        <input
+                                            type="text"
+                                            required
+                                            value={lgpdChangelog}
+                                            onChange={(e) => setLgpdChangelog(e.target.value)}
+                                            placeholder="Ex: Inclusão de cláusula de retenção..."
+                                            className="w-full px-3 py-1.5 text-xs bg-slate-900 border border-slate-700 rounded-lg text-white"
+                                        />
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <label className="block text-[11px] text-slate-400 mb-1">
+                                        Texto dos Termos de Uso *
+                                    </label>
+                                    <textarea
+                                        rows={5}
+                                        required
+                                        value={lgpdTermsContent}
+                                        onChange={(e) => setLgpdTermsContent(e.target.value)}
+                                        className="w-full px-3 py-1.5 text-xs bg-slate-900 border border-slate-700 rounded-lg text-white leading-relaxed"
+                                    />
+                                </div>
+
+                                <div>
+                                    <label className="block text-[11px] text-slate-400 mb-1">
+                                        Texto da Política de Privacidade (LGPD) *
+                                    </label>
+                                    <textarea
+                                        rows={5}
+                                        required
+                                        value={lgpdPrivacyContent}
+                                        onChange={(e) => setLgpdPrivacyContent(e.target.value)}
+                                        className="w-full px-3 py-1.5 text-xs bg-slate-900 border border-slate-700 rounded-lg text-white leading-relaxed"
+                                    />
+                                </div>
+
+                                <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer pt-1">
+                                    <input
+                                        type="checkbox"
+                                        checked={lgpdRequireReconsent}
+                                        onChange={(e) => setLgpdRequireReconsent(e.target.checked)}
+                                        className="rounded border-slate-600 bg-slate-900 text-indigo-600"
+                                    />
+                                    <span>Exigir novo aceite dos estudantes na próxima sessão</span>
+                                </label>
+
+                                <button
+                                    type="submit"
+                                    className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-lg transition-colors cursor-pointer"
+                                >
+                                    Publicar Nova Versão LGPD
+                                </button>
+                            </form>
+
+                            <div className="lg:col-span-7 space-y-3 min-w-0">
+                                <h3 className="text-sm font-bold text-white">
+                                    Histórico de Versões dos Termos e Política de Privacidade ({lgpdVersions.length})
+                                </h3>
+                                <div className="border border-slate-800 rounded-xl overflow-x-auto max-h-[560px] overflow-y-auto">
+                                    <table className="w-full text-left text-xs">
+                                        <thead className="bg-slate-950 text-slate-400 uppercase border-b border-slate-800">
+                                            <tr>
+                                                <th className="py-2.5 px-3">Versão</th>
+                                                <th className="py-2.5 px-3">Resumo das Alterações</th>
+                                                <th className="py-2.5 px-3">Aceites Ativos</th>
+                                                <th className="py-2.5 px-3">Autor / Data</th>
+                                                <th className="py-2.5 px-3 text-right">Ações</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-slate-800/60">
+                                            {lgpdVersions.map((ver, idx) => (
+                                                <tr key={`${ver.version}-${idx}`} className="hover:bg-slate-800/30">
+                                                    <td className="py-2.5 px-3 whitespace-nowrap">
+                                                        <span
+                                                            className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold ${
+                                                                idx === 0
+                                                                    ? 'bg-emerald-900/40 text-emerald-300 border border-emerald-700/40'
+                                                                    : 'bg-slate-800 text-slate-300'
+                                                            }`}
+                                                        >
+                                                            v{ver.version} {idx === 0 ? '(Atual)' : ''}
+                                                        </span>
+                                                    </td>
+                                                    <td className="py-2.5 px-3 max-w-[260px]">
+                                                        <div className="font-medium text-white">{ver.changelog}</div>
+                                                        <div className="text-slate-400 text-[11px] truncate">
+                                                            {ver.terms_title}
+                                                        </div>
+                                                    </td>
+                                                    <td className="py-2.5 px-3 text-cyan-300 font-semibold whitespace-nowrap">
+                                                        {ver.accepted_users_count} conta(s)
+                                                    </td>
+                                                    <td className="py-2.5 px-3 text-slate-300 text-[11px] whitespace-nowrap">
+                                                        <div>{ver.author_name}</div>
+                                                        <div className="text-slate-500">{ver.updated_at}</div>
+                                                    </td>
+                                                    <td className="py-2.5 px-3 text-right whitespace-nowrap">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => {
+                                                                setLgpdVersionNumber(ver.version);
+                                                                setLgpdChangelog(ver.changelog);
+                                                                setLgpdTermsContent(ver.terms_content);
+                                                                setLgpdPrivacyContent(ver.privacy_content);
+                                                            }}
+                                                            className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-indigo-300 rounded font-medium cursor-pointer"
+                                                        >
+                                                            Carregar no Editor
+                                                        </button>
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
                     {activeTab === 'logs' && (
                         <div className="space-y-4">
                             <div className="flex justify-between items-center">
@@ -1483,7 +1746,7 @@ export const AdminLogsModal: React.FC<AdminLogsModalProps> = ({
                                     <thead className="bg-slate-950/80 text-xs uppercase text-slate-400 border-b border-slate-800">
                                         <tr>
                                             <th className="py-3 px-4">Data/Hora (UTC)</th>
-                                            <th className="py-3 px-4">Usuário</th>
+                                            <th className="py-3 px-4">Usuário (E-mail Mascarado LGPD)</th>
                                             <th className="py-3 px-4">Ação</th>
                                             <th className="py-3 px-4">Endereço IP</th>
                                             <th className="py-3 px-4">Navegador / Dispositivo</th>
@@ -1497,7 +1760,9 @@ export const AdminLogsModal: React.FC<AdminLogsModalProps> = ({
                                                 </td>
                                                 <td className="py-3 px-4 font-sans text-white">
                                                     <div className="font-medium">{log.user_name}</div>
-                                                    <div className="text-slate-400 text-xs">{log.user_email}</div>
+                                                    <div className="text-slate-400 text-xs font-mono">
+                                                        {maskEmailAddress(log.user_email)}
+                                                    </div>
                                                 </td>
                                                 <td className="py-3 px-4 whitespace-nowrap font-sans">
                                                     <span

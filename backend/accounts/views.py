@@ -43,6 +43,45 @@ def get_client_ip(request):
     return request.META.get('REMOTE_ADDR')
 
 
+def mask_email_for_audit(email):
+    raw = str(email or '').strip()
+    if not raw or '@' not in raw:
+        return raw or 'Anônimo / Não identificado'
+    local_part, domain_part = raw.split('@', 1)
+    if len(local_part) <= 2:
+        prefix = local_part[:1]
+        suffix = local_part[-1:] if len(local_part) > 1 else ''
+        return f"{prefix}******{suffix}@{domain_part}"
+    if len(local_part) <= 5:
+        return f"{local_part[:2]}******{local_part[-1:]}@{domain_part}"
+    return f"{local_part[:3]}******{local_part[-2:]}@{domain_part}"
+
+
+def mask_audit_details(details):
+    if not isinstance(details, dict):
+        return {}
+    masked = dict(details)
+    for key in ('attempted_email', 'deleted_email', 'target_email', 'email'):
+        val = masked.get(key)
+        if isinstance(val, str) and '@' in val:
+            masked[key] = mask_email_for_audit(val)
+    return masked
+
+
+_ATLAS_BONES_CACHE = {'data': None, 'ts': 0.0}
+_LGPD_DOC_CACHE = {'data': None, 'ts': 0.0}
+
+
+def invalidate_atlas_cache():
+    _ATLAS_BONES_CACHE['data'] = None
+    _ATLAS_BONES_CACHE['ts'] = 0.0
+
+
+def invalidate_lgpd_cache():
+    _LGPD_DOC_CACHE['data'] = None
+    _LGPD_DOC_CACHE['ts'] = 0.0
+
+
 def is_auth_rate_limited(action_types, ip=None, email=None, max_attempts=None, window_minutes=None):
     try:
         limit = max_attempts or getattr(settings, 'MAX_AUTH_ATTEMPTS', 5)
@@ -66,13 +105,14 @@ def is_auth_rate_limited(action_types, ip=None, email=None, max_attempts=None, w
     return False
 
 
-DEFAULT_GAS_MACRO_ID = 'AKfycbxEJisodNf08V8bbvcF9uIRzQBy5noeSRznkvwXX8_AwwNimYpBKrkjwFTm3WQpIbe1wQ'
+DEFAULT_GAS_MACRO_ID = 'AKfycbyRVzlJDgB7r3VFwoJQOZNkQhazf1F8r7lCbpRGLhro2FTux2bzEjGWc5VXTwQe37bhfQ'
+LEGACY_GAS_MACRO_ID = 'AKfycbxEJisodNf08V8bbvcF9uIRzQBy5noeSRznkvwXX8_AwwNimYpBKrkjwFTm3WQpIbe1wQ'
 
 
 def dispatch_email_with_https_fallback(recipient, subject, message, html_message):
     is_mocked = hasattr(send_mail, 'assert_called')
     webhook_url = getattr(settings, 'GMAIL_WEBHOOK_URL', '') or os.getenv('GMAIL_WEBHOOK_URL', '')
-    if not webhook_url and DEFAULT_GAS_MACRO_ID:
+    if (not webhook_url or LEGACY_GAS_MACRO_ID in webhook_url) and DEFAULT_GAS_MACRO_ID:
         webhook_url = f"https://script.google.com/macros/s/{DEFAULT_GAS_MACRO_ID}/exec"
 
     if not is_mocked and webhook_url and os.getenv('RENDER'):
@@ -238,19 +278,31 @@ def send_notification_email(recipient_email, recipient_name, title, message):
     return dispatch_email_with_https_fallback(recipient_email, assunto, corpo_texto, html_mensagem)
 
 
+def check_and_reset_daily_streak(user):
+    if not user or not getattr(user, 'id', None):
+        return 0
+    today = timezone.localdate()
+    if user.last_study_date is None or user.last_study_date < today:
+        if user.streak_days != 0:
+            user.streak_days = 0
+            user.save(update_fields=['streak_days'])
+    return user.streak_days
+
+
 def update_user_study_streak(user, activity_name=None, progress=None):
     today = timezone.localdate()
     if user.last_study_date is None:
         user.streak_days = max(1, user.streak_days)
         user.last_study_date = today
     elif user.last_study_date == today - timedelta(days=1):
-        user.streak_days += 1
+        user.streak_days = max(1, user.streak_days) + 1 if user.streak_days > 0 else 1
         user.last_study_date = today
     elif user.last_study_date < today - timedelta(days=1):
         user.streak_days = 1
         user.last_study_date = today
     elif user.streak_days == 0:
         user.streak_days = 1
+        user.last_study_date = today
 
     if activity_name:
         user.last_quiz_name = str(activity_name)[:150]
@@ -263,7 +315,88 @@ def update_user_study_streak(user, activity_name=None, progress=None):
     user.save(update_fields=['streak_days', 'last_study_date', 'last_quiz_name', 'last_quiz_progress'])
 
 
+def compute_pedagogical_efficacy_metrics(user=None):
+    attempts_qs = QuizAttempt.objects.select_related('bone').order_by('created_at', 'id')
+    records_qs = BoneStudyRecord.objects.select_related('bone')
+    if user is not None:
+        attempts_qs = attempts_qs.filter(user=user)
+        records_qs = records_qs.filter(user=user)
+
+    attempts = list(attempts_qs)
+    records = list(records_qs)
+
+    studied_map = {}
+    for rec in records:
+        studied_map[(rec.user_id, rec.bone_id)] = bool(rec.studied_in_atlas)
+
+    grouped_attempts = {}
+    for att in attempts:
+        key = (att.user_id, att.bone_id)
+        grouped_attempts.setdefault(key, []).append(att.accuracy)
+
+    with_atlas_scores = []
+    without_atlas_scores = []
+    first_attempt_scores = []
+    post_review_scores = []
+    improved_bones_count = 0
+    retested_bones_count = 0
+
+    for key, acc_list in grouped_attempts.items():
+        studied_3d = studied_map.get(key, False)
+        if len(acc_list) >= 2:
+            retested_bones_count += 1
+            first_acc = acc_list[0]
+            best_after = max(acc_list[1:])
+            first_attempt_scores.append(first_acc)
+            post_review_scores.append(best_after)
+            without_atlas_scores.append(first_acc)
+            with_atlas_scores.append(best_after)
+            if best_after > first_acc:
+                improved_bones_count += 1
+        elif len(acc_list) == 1:
+            only_acc = acc_list[0]
+            if studied_3d:
+                with_atlas_scores.append(only_acc)
+            else:
+                without_atlas_scores.append(only_acc)
+                first_attempt_scores.append(only_acc)
+
+    with_atlas_avg = round(sum(with_atlas_scores) / len(with_atlas_scores)) if with_atlas_scores else 0
+    without_atlas_avg = round(sum(without_atlas_scores) / len(without_atlas_scores)) if without_atlas_scores else 0
+    first_attempt_avg = round(sum(first_attempt_scores) / len(first_attempt_scores)) if first_attempt_scores else 0
+    post_review_avg = round(sum(post_review_scores) / len(post_review_scores)) if post_review_scores else with_atlas_avg
+
+    atlas_advantage_pct = (
+        with_atlas_avg - without_atlas_avg
+        if (with_atlas_scores and without_atlas_scores)
+        else (with_atlas_avg if with_atlas_scores else 0)
+    )
+    learning_gain_pct = (
+        post_review_avg - first_attempt_avg
+        if (post_review_scores and first_attempt_scores)
+        else atlas_advantage_pct
+    )
+
+    bones_studied_in_3d = sum(1 for val in studied_map.values() if val)
+
+    return {
+        'withAtlasAvg': with_atlas_avg,
+        'withoutAtlasAvg': without_atlas_avg,
+        'atlasAdvantagePct': atlas_advantage_pct,
+        'withAtlasAttemptsCount': len(with_atlas_scores),
+        'withoutAtlasAttemptsCount': len(without_atlas_scores),
+        'firstAttemptAvg': first_attempt_avg,
+        'postReviewAvg': post_review_avg,
+        'learningGainPct': learning_gain_pct,
+        'retestedBonesCount': retested_bones_count,
+        'improvedBonesCount': improved_bones_count,
+        'bonesStudiedIn3DCount': bones_studied_in_3d,
+        'totalEvaluatedAttempts': len(attempts),
+    }
+
+
 def build_user_dashboard_stats(user):
+    check_and_reset_daily_streak(user)
     attempts = list(QuizAttempt.objects.filter(user=user).select_related('bone'))
     bone_studies = list(BoneStudyRecord.objects.filter(user=user).select_related('bone'))
 
@@ -302,6 +435,7 @@ def build_user_dashboard_stats(user):
         'lastQuizProgress': user.last_quiz_progress,
         'boneScores': bone_scores,
         'studiedBones': studied_bones,
+        'pedagogicalEfficacy': compute_pedagogical_efficacy_metrics(user),
     }
 
 
@@ -641,6 +775,7 @@ class MeView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
+        check_and_reset_daily_streak(request.user)
         return Response(UserSerializer(request.user).data)
 
 
@@ -673,10 +808,13 @@ class LGPDConsentView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
+        current_doc = get_current_lgpd_document()
+        active_version = current_doc.get('version', '1.0')
         user = request.user
         user.lgpd_consent = True
-        user.lgpd_consent_version = '1.0'
+        user.lgpd_consent_version = active_version
         user.lgpd_consent_at = timezone.now()
+        user.lgpd_consent_ip = get_client_ip(request)
         user.save()
 
         ip = get_client_ip(request)
@@ -686,7 +824,7 @@ class LGPDConsentView(APIView):
             action='CONSENT_ACCEPTED',
             ip_address=ip,
             user_agent=user_agent,
-            details={'version': '1.0', 'method': 'oauth_modal'}
+            details={'version': active_version, 'method': 'oauth_modal'}
         )
 
         return Response({
@@ -730,25 +868,37 @@ class AdminAuditLogsView(APIView):
 
         data = []
         for log in logs:
+            raw_email = log.user.email if log.user else ''
+            if not raw_email and isinstance(log.details, dict):
+                raw_email = (
+                    log.details.get('attempted_email')
+                    or log.details.get('deleted_email')
+                    or ''
+                )
+            masked_email = (
+                mask_email_for_audit(raw_email)
+                if raw_email
+                else 'Anônimo / Não identificado'
+            )
             data.append({
                 'id': log.id,
-                'user_email': log.user.email if log.user else 'Anônimo / Não identificado',
+                'user_email': masked_email,
                 'user_name': log.user.name if log.user else 'Visitante',
                 'action': log.action,
                 'action_display': log.get_action_display(),
                 'ip_address': log.ip_address,
                 'user_agent': log.user_agent,
                 'timestamp': log.timestamp.strftime('%d/%m/%Y %H:%M:%S'),
-                'details': log.details
+                'details': mask_audit_details(log.details),
             })
 
-        all_attempts = list(QuizAttempt.objects.all())
-        total_attempts = len(all_attempts)
-        global_avg_accuracy = (
-            round(sum(a.accuracy for a in all_attempts) / total_attempts)
-            if total_attempts > 0
-            else 0
+        from django.db.models import Avg, Count
+        agg = QuizAttempt.objects.aggregate(
+            total=Count('id'),
+            avg_acc=Avg('accuracy'),
         )
+        total_attempts = agg['total'] or 0
+        global_avg_accuracy = round(agg['avg_acc']) if agg['avg_acc'] is not None else 0
 
         summary = {
             'total_users': User.objects.count(),
@@ -759,6 +909,7 @@ class AdminAuditLogsView(APIView):
             'total_events': AuditLog.objects.count(),
             'total_quiz_attempts': total_attempts,
             'global_avg_accuracy': global_avg_accuracy,
+            'pedagogical_efficacy': compute_pedagogical_efficacy_metrics(None),
         }
 
         return Response({'logs': data, 'total': len(data), 'summary': summary}, status=status.HTTP_200_OK)
@@ -791,7 +942,9 @@ class RecordBoneStudyView(APIView):
 
         if bone:
             record, _ = BoneStudyRecord.objects.get_or_create(user=request.user, bone=bone)
-            if not record.studied_in_atlas:
+            act_str = str(activity_name or '').strip()
+            is_atlas_study = not act_str or act_str.lower().startswith('atlas')
+            if is_atlas_study and not record.studied_in_atlas:
                 record.studied_in_atlas = True
                 record.save(update_fields=['studied_in_atlas', 'updated_at'])
 
@@ -956,7 +1109,6 @@ class QuizFinishAttemptView(APIView):
         )
 
         record, _ = BoneStudyRecord.objects.get_or_create(user=request.user, bone=bone)
-        record.studied_in_atlas = True
         record.last_accuracy = accuracy
         record.best_accuracy = max(record.best_accuracy or 0, accuracy)
         record.attempts_count += 1
@@ -976,6 +1128,12 @@ class AtlasBonesView(APIView):
     permission_classes = [permissions.AllowAny]
 
     def get(self, request):
+        import time
+        now = time.monotonic()
+        if _ATLAS_BONES_CACHE['data'] is not None and (now - _ATLAS_BONES_CACHE['ts']) < 300:
+            if Bone.objects.filter(is_active=True).count() == _ATLAS_BONES_CACHE['data']['total']:
+                return Response(_ATLAS_BONES_CACHE['data'], status=status.HTTP_200_OK)
+
         bones = ensure_default_atlas_seeded()
         result = []
         for b in bones:
@@ -997,6 +1155,7 @@ class AtlasBonesView(APIView):
                 }
                 for p in b.pathologies.all()
             ]
+            active_q_count = sum(1 for q in b.questions.all() if q.is_active)
             result.append({
                 'id': b.id,
                 'name': b.name,
@@ -1008,12 +1167,15 @@ class AtlasBonesView(APIView):
                 'description': b.description,
                 'clinicalSummary': b.clinical_summary,
                 'landmarksCount': len(landmarks),
-                'quizQuestionsCount': b.questions.filter(is_active=True).count(),
+                'quizQuestionsCount': active_q_count,
                 'landmarks': landmarks,
                 'pathologies': pathologies,
             })
 
-        return Response({'bones': result, 'total': len(result)}, status=status.HTTP_200_OK)
+        payload = {'bones': result, 'total': len(result)}
+        _ATLAS_BONES_CACHE['data'] = payload
+        _ATLAS_BONES_CACHE['ts'] = now
+        return Response(payload, status=status.HTTP_200_OK)
 
 
 class CalibrateLandmarkView(APIView):
@@ -1066,6 +1228,7 @@ class CalibrateLandmarkView(APIView):
                     if lm_item['order'] == landmark.order or lm_item['name'] == landmark.name:
                         lm_item['pos'] = [pos_x, pos_y, pos_z]
 
+        invalidate_atlas_cache()
         return Response(
             {
                 'message': f'Coordenada 3D de "{landmark.name}" salva com sucesso!',
@@ -1182,7 +1345,7 @@ def serialize_admin_bone(bone):
         'clinical_summary': bone.clinical_summary,
         'is_active': bone.is_active,
         'landmarks_count': len(landmarks),
-        'questions_count': bone.questions.filter(is_active=True).count(),
+        'questions_count': sum(1 for q in bone.questions.all() if q.is_active),
         'landmarks': landmarks,
         'pathologies': pathologies,
     }
@@ -1290,6 +1453,7 @@ class AdminBonesManageView(APIView):
         except Exception:
             return Response({'error': 'Formato inválido para marcadores espaciais ou patologias.'}, status=status.HTTP_400_BAD_REQUEST)
 
+        invalidate_atlas_cache()
         return Response(serialize_admin_bone(bone), status=status.HTTP_201_CREATED)
 
 
@@ -1344,6 +1508,7 @@ class AdminBoneDetailView(APIView):
         except Exception:
             return Response({'error': 'Formato inválido para marcadores espaciais ou patologias.'}, status=status.HTTP_400_BAD_REQUEST)
 
+        invalidate_atlas_cache()
         return Response(serialize_admin_bone(bone), status=status.HTTP_200_OK)
 
     def put(self, request, pk):
@@ -1358,6 +1523,7 @@ class AdminBoneDetailView(APIView):
             return Response({'error': 'Modelo anatômico não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
 
         bone.delete()
+        invalidate_atlas_cache()
         return Response({'message': 'Modelo anatômico removido com sucesso.'}, status=status.HTTP_200_OK)
 
 
@@ -1449,6 +1615,7 @@ class AdminQuestionsManageView(APIView):
             pos_z=pos_z,
             is_active=is_active,
         )
+        invalidate_atlas_cache()
         return Response(serialize_admin_question(q), status=status.HTTP_201_CREATED)
 
 
@@ -1690,4 +1857,196 @@ class AdminNotificationDetailView(APIView):
 
         log.delete()
         return Response({'message': 'Notificação excluída com sucesso.'}, status=status.HTTP_200_OK)
+
+
+DEFAULT_LGPD_TERMS_CONTENT = (
+    "1. Finalidade Educacional e Acadêmica: A plataforma OsteoLearn é um ambiente virtual interativo "
+    "de aprendizagem voltado ao estudo de Osteologia Humana 3D, Guia Clínico de Patologias Ósseas e "
+    "Avaliação Prática (Prova da Alfinetada). As informações têm caráter estritamente didático e não "
+    "substituem diagnóstico ou conduta médica.\n\n"
+    "2. Responsabilidade sobre Credenciais: O estudante compromete-se a manter o sigilo de sua senha "
+    "e dos códigos de verificação em duas etapas (2FA) enviados ao seu e-mail institucional ou pessoal.\n\n"
+    "3. Propriedade Intelectual e Uso do Acervo 3D: Os modelos tridimensionais (.glb), marcações "
+    "anatômicas espaciais e bancos de questões destinam-se exclusivamente ao estudo individual e em "
+    "laboratório acadêmico.\n\n"
+    "4. Mensuração de Desempenho e Eficácia Pedagógica 3D: Ao utilizar o Atlas 3D Interativo e realizar "
+    "a Prova da Alfinetada (Quiz 3D), o sistema registra automaticamente quais peças anatômicas foram "
+    "exploradas em 3D e o histórico de pontuação por tentativa, gerando indicadores de evolução "
+    "individual para o estudante e métricas estatísticas agregadas de eficácia pedagógica."
+)
+
+DEFAULT_LGPD_PRIVACY_CONTENT = (
+    "1. Dados Coletados e Base Legal (Lei nº 13.709/2018 - LGPD): Coletamos apenas nome, endereço de "
+    "e-mail, registro de consentimento (versão, data/hora e endereço IP) e métricas pedagógicas de "
+    "interação e progresso no Atlas 3D Interativo e na Prova da Alfinetada.\n\n"
+    "2. Tratamento Estatístico Anonimizado para Pesquisa Acadêmica (Art. 7º, IV da LGPD): Os registros "
+    "de estudo prévio de ossos no Atlas 3D e as taxas de acerto nos quizzes (comparativo de desempenho "
+    "Com Estudo 3D vs. Sem Estudo 3D e curva de evolução entre a 1ª tentativa diagnóstica e o pós-revisão) "
+    "são processados de forma estritamente agregada e anonimizada para comprovação científica da eficácia "
+    "pedagógica da plataforma, sem identificar individualmente nenhum estudante nos relatórios globais.\n\n"
+    "3. Segurança, Criptografia e Mascaramento: As senhas são armazenadas com hash criptográfico PBKDF2 "
+    "SHA-256, os códigos 2FA com hash SHA-256 e os e-mails exibidos nos logs administrativos de auditoria "
+    "são mascarados com asteriscos (ex: mat******sb@gmail.com) para proteção da privacidade.\n\n"
+    "4. Direitos do Titular (Art. 18 da LGPD): A qualquer momento, o estudante pode exportar todos os "
+    "seus dados e histórico de tentativas em formato JSON ou solicitar a exclusão definitiva e imediata "
+    "de sua conta diretamente no menu de configurações da plataforma."
+)
+
+
+def serialize_lgpd_version_log(log):
+    details = log.details if isinstance(log.details, dict) else {}
+    version_str = str(details.get('version') or '1.0')
+    accepted_count = User.objects.filter(
+        lgpd_consent=True,
+        lgpd_consent_version=version_str,
+    ).count()
+    return {
+        'id': log.id,
+        'version': version_str,
+        'terms_title': details.get('terms_title') or f'Termos de Uso da Plataforma OsteoLearn (v{version_str})',
+        'terms_content': details.get('terms_content') or DEFAULT_LGPD_TERMS_CONTENT,
+        'privacy_title': details.get('privacy_title') or f'Política de Privacidade e Proteção de Dados - LGPD (v{version_str})',
+        'privacy_content': details.get('privacy_content') or DEFAULT_LGPD_PRIVACY_CONTENT,
+        'changelog': details.get('changelog') or 'Versão institucional publicada.',
+        'require_reconsent': bool(details.get('require_reconsent', False)),
+        'author_name': details.get('author_name') or 'Administração OsteoLearn',
+        'accepted_users_count': accepted_count,
+        'updated_at': log.timestamp.strftime('%d/%m/%Y %H:%M'),
+    }
+
+
+def get_current_lgpd_document():
+    import time
+    now = time.monotonic()
+    if _LGPD_DOC_CACHE['data'] is not None and (now - _LGPD_DOC_CACHE['ts']) < 120:
+        return _LGPD_DOC_CACHE['data']
+
+    latest_log = (
+        AuditLog.objects.filter(action='LGPD_TERMS_UPDATED')
+        .order_by('-timestamp')
+        .first()
+    )
+    if latest_log:
+        doc = serialize_lgpd_version_log(latest_log)
+        _LGPD_DOC_CACHE['data'] = doc
+        _LGPD_DOC_CACHE['ts'] = now
+        return doc
+    accepted_v1 = User.objects.filter(lgpd_consent=True, lgpd_consent_version='1.0').count()
+    doc = {
+        'id': 0,
+        'version': '1.0',
+        'terms_title': 'Termos de Uso da Plataforma OsteoLearn (v1.0)',
+        'terms_content': DEFAULT_LGPD_TERMS_CONTENT,
+        'privacy_title': 'Política de Privacidade e Proteção de Dados - LGPD (v1.0)',
+        'privacy_content': DEFAULT_LGPD_PRIVACY_CONTENT,
+        'changelog': 'Versão inicial v1.0 dos Termos de Uso e Política de Privacidade LGPD.',
+        'require_reconsent': False,
+        'author_name': 'Equipe OsteoLearn',
+        'accepted_users_count': accepted_v1,
+        'updated_at': 'Versão Base v1.0',
+    }
+    _LGPD_DOC_CACHE['data'] = doc
+    _LGPD_DOC_CACHE['ts'] = now
+    return doc
+
+
+class LGPDTermsCurrentView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request):
+        current = get_current_lgpd_document()
+        logs = list(
+            AuditLog.objects.filter(action='LGPD_TERMS_UPDATED').order_by('-timestamp')[:30]
+        )
+        history = [serialize_lgpd_version_log(log) for log in logs]
+        if not history:
+            history = [current]
+        return Response({'current': current, 'history': history}, status=status.HTTP_200_OK)
+
+
+class AdminLGPDVersionsView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        if not getattr(request.user, 'is_admin', False):
+            return Response({'error': 'Acesso restrito a administradores.'}, status=status.HTTP_403_FORBIDDEN)
+
+        current = get_current_lgpd_document()
+        logs = list(
+            AuditLog.objects.filter(action='LGPD_TERMS_UPDATED').order_by('-timestamp')[:50]
+        )
+        versions = [serialize_lgpd_version_log(log) for log in logs]
+        if not any(v['version'] == '1.0' for v in versions):
+            accepted_v1 = User.objects.filter(lgpd_consent=True, lgpd_consent_version='1.0').count()
+            versions.append({
+                'id': 0,
+                'version': '1.0',
+                'terms_title': 'Termos de Uso da Plataforma OsteoLearn (v1.0)',
+                'terms_content': DEFAULT_LGPD_TERMS_CONTENT,
+                'privacy_title': 'Política de Privacidade e Proteção de Dados - LGPD (v1.0)',
+                'privacy_content': DEFAULT_LGPD_PRIVACY_CONTENT,
+                'changelog': 'Versão base inicial v1.0.',
+                'require_reconsent': False,
+                'author_name': 'Equipe OsteoLearn',
+                'accepted_users_count': accepted_v1,
+                'updated_at': 'Versão Base',
+            })
+        return Response(
+            {'current': current, 'versions': versions, 'total': len(versions)},
+            status=status.HTTP_200_OK,
+        )
+
+    def post(self, request):
+        if not getattr(request.user, 'is_admin', False):
+            return Response({'error': 'Acesso restrito a administradores.'}, status=status.HTTP_403_FORBIDDEN)
+
+        version = str(request.data.get('version', '')).strip().lstrip('vV')
+        terms_content = str(request.data.get('terms_content', '')).strip()
+        privacy_content = str(request.data.get('privacy_content', '')).strip()
+        changelog = str(request.data.get('changelog', '')).strip() or 'Atualização de cláusulas dos Termos e Política de Privacidade.'
+        require_reconsent = bool(request.data.get('require_reconsent', False))
+
+        if not version:
+            return Response({'error': 'Informe o número da nova versão (ex: 1.1 ou 2.0).'}, status=status.HTTP_400_BAD_REQUEST)
+        if not terms_content or not privacy_content:
+            return Response(
+                {'error': 'O texto dos Termos de Uso e da Política de Privacidade são obrigatórios.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        terms_title = str(request.data.get('terms_title', '')).strip() or f'Termos de Uso da Plataforma OsteoLearn (v{version})'
+        privacy_title = str(request.data.get('privacy_title', '')).strip() or f'Política de Privacidade e Proteção de Dados - LGPD (v{version})'
+        author_name = request.user.name.strip() if request.user.name and request.user.name.strip() else 'Administrador'
+
+        log = AuditLog.objects.create(
+            user=request.user,
+            action='LGPD_TERMS_UPDATED',
+            ip_address=get_client_ip(request),
+            user_agent=request.META.get('HTTP_USER_AGENT', ''),
+            details={
+                'version': version,
+                'terms_title': terms_title,
+                'terms_content': terms_content,
+                'privacy_title': privacy_title,
+                'privacy_content': privacy_content,
+                'changelog': changelog,
+                'require_reconsent': require_reconsent,
+                'author_name': author_name,
+            },
+        )
+
+        affected_users = 0
+        if require_reconsent:
+            affected_users = User.objects.exclude(lgpd_consent_version=version).update(lgpd_consent=False)
+
+        invalidate_lgpd_cache()
+        return Response(
+            {
+                'version_item': serialize_lgpd_version_log(log),
+                'affected_users': affected_users,
+                'message': f'Versão v{version} dos Termos de Uso e Política de Privacidade publicada com sucesso!',
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
 

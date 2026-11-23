@@ -361,6 +361,7 @@ export default function App() {
     lastQuizProgress: 0,
     boneScores: {} as Record<string, number>,
     studiedBones: [] as string[],
+    pedagogicalEfficacy: undefined as any,
   };
 
   const [quizStats, setQuizStats] = useState(emptyStats);
@@ -379,6 +380,7 @@ export default function App() {
       lastQuizProgress: data.lastQuizProgress ?? 0,
       boneScores: data.boneScores && typeof data.boneScores === 'object' ? data.boneScores : {},
       studiedBones: studiedList,
+      pedagogicalEfficacy: data.pedagogicalEfficacy,
     });
   };
 

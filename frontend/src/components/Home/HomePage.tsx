@@ -40,6 +40,20 @@ interface HomePageProps {
         lastQuizProgress: number;
         boneScores?: Record<string, number>;
         studiedBones?: string[];
+        pedagogicalEfficacy?: {
+            withAtlasAvg: number;
+            withoutAtlasAvg: number;
+            atlasAdvantagePct: number;
+            withAtlasAttemptsCount: number;
+            withoutAtlasAttemptsCount: number;
+            firstAttemptAvg: number;
+            postReviewAvg: number;
+            learningGainPct: number;
+            retestedBonesCount: number;
+            improvedBonesCount: number;
+            bonesStudiedIn3DCount: number;
+            totalEvaluatedAttempts: number;
+        };
     };
 }
 
@@ -566,6 +580,137 @@ export const HomePage: React.FC<HomePageProps> = ({
                                     <ArrowRight className="w-3.5 h-3.5" />
                                 </div>
                             </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="flex flex-col gap-4 pt-1">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <div className="flex flex-col gap-0.5">
+                            <div className="flex items-center gap-2">
+                                <TrendingUp className="w-5 h-5 text-[#2E482C]" />
+                                <h3 className="text-slate-800 text-xl font-serif font-semibold">
+                                    Eficácia Pedagógica do Atlas 3D
+                                </h3>
+                            </div>
+                            <p className="text-slate-500 text-xs">
+                                Indicadores de ganho de aprendizagem comparando avaliações com estudo prévio na malha 3D e evolução pós-revisão
+                            </p>
+                        </div>
+
+                        <div className="px-3.5 py-1.5 bg-emerald-50 border border-emerald-200 rounded-full text-emerald-800 text-xs font-semibold flex items-center gap-1.5 w-fit">
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                            <span>
+                                {quizStats.pedagogicalEfficacy?.bonesStudiedIn3DCount ?? studiedSet.size} estruturas exploradas no Atlas 3D
+                            </span>
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                        <div className="bg-white rounded-2xl border border-stone-200 p-6 shadow-[0px_1px_2px_0px_rgba(30,41,59,0.05)] flex flex-col justify-between gap-4">
+                            <div className="flex items-start justify-between gap-3">
+                                <div>
+                                    <span className="text-[10px] uppercase tracking-wider font-bold text-[#2E482C]">
+                                        Comparativo por Método de Estudo
+                                    </span>
+                                    <h4 className="text-base font-serif font-bold text-slate-800 mt-0.5">
+                                        Com Estudo Prévio no Atlas 3D vs. Sem Estudo 3D
+                                    </h4>
+                                </div>
+                                <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 whitespace-nowrap">
+                                    {(quizStats.pedagogicalEfficacy?.atlasAdvantagePct ?? quizStats.avgAccuracy) >= 0
+                                        ? `+${quizStats.pedagogicalEfficacy?.atlasAdvantagePct ?? quizStats.avgAccuracy}% com Atlas 3D`
+                                        : `${quizStats.pedagogicalEfficacy?.atlasAdvantagePct}%`}
+                                </span>
+                            </div>
+
+                            <div className="space-y-3">
+                                <div className="space-y-1">
+                                    <div className="flex justify-between text-xs font-semibold">
+                                        <span className="text-[#2E482C]">
+                                            Com Estudo Prévio no Atlas 3D ({quizStats.pedagogicalEfficacy?.withAtlasAttemptsCount ?? quizStats.totalQuizzes} aval.)
+                                        </span>
+                                        <span className="text-slate-900">
+                                            {quizStats.pedagogicalEfficacy?.withAtlasAvg ?? quizStats.avgAccuracy}%
+                                        </span>
+                                    </div>
+                                    <div className="w-full h-3 bg-stone-100 rounded-full overflow-hidden">
+                                        <div
+                                            className="h-full bg-[#2E482C] rounded-full transition-all duration-500"
+                                            style={{
+                                                width: `${quizStats.pedagogicalEfficacy?.withAtlasAvg ?? quizStats.avgAccuracy}%`,
+                                            }}
+                                        />
+                                    </div>
+                                </div>
+
+                                <div className="space-y-1">
+                                    <div className="flex justify-between text-xs font-medium">
+                                        <span className="text-slate-500">
+                                            Sem Estudo Prévio / Tentativa Inicial ({quizStats.pedagogicalEfficacy?.withoutAtlasAttemptsCount ?? 0} aval.)
+                                        </span>
+                                        <span className="text-slate-700">
+                                            {quizStats.pedagogicalEfficacy?.withoutAtlasAvg ?? 0}%
+                                        </span>
+                                    </div>
+                                    <div className="w-full h-3 bg-stone-100 rounded-full overflow-hidden">
+                                        <div
+                                            className="h-full bg-amber-500 rounded-full transition-all duration-500"
+                                            style={{
+                                                width: `${quizStats.pedagogicalEfficacy?.withoutAtlasAvg ?? 0}%`,
+                                            }}
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+
+                            <p className="text-[11px] text-slate-500 leading-relaxed">
+                                Mede a diferença de precisão na Prova da Alfinetada entre ossos inspecionados previamente no Visualizador 3D e tentativas realizadas sem revisão tridimensional prévia.
+                            </p>
+                        </div>
+
+                        <div className="bg-white rounded-2xl border border-stone-200 p-6 shadow-[0px_1px_2px_0px_rgba(30,41,59,0.05)] flex flex-col justify-between gap-4">
+                            <div className="flex items-start justify-between gap-3">
+                                <div>
+                                    <span className="text-[10px] uppercase tracking-wider font-bold text-amber-700">
+                                        Curva de Evolução Longitudinal
+                                    </span>
+                                    <h4 className="text-base font-serif font-bold text-slate-800 mt-0.5">
+                                        1ª Tentativa (Diagnóstica) vs. Pós-Revisão 3D
+                                    </h4>
+                                </div>
+                                <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-900 whitespace-nowrap">
+                                    {(quizStats.pedagogicalEfficacy?.learningGainPct ?? 0) >= 0
+                                        ? `+${quizStats.pedagogicalEfficacy?.learningGainPct ?? 0}% de evolução`
+                                        : `${quizStats.pedagogicalEfficacy?.learningGainPct}%`}
+                                </span>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-3">
+                                <div className="p-3.5 rounded-xl bg-stone-50 border border-stone-200 flex flex-col">
+                                    <span className="text-[11px] text-slate-500 font-medium">
+                                        Média 1ª Tentativa (Inicial)
+                                    </span>
+                                    <span className="text-2xl font-serif font-bold text-slate-700 mt-1">
+                                        {quizStats.pedagogicalEfficacy?.firstAttemptAvg ?? 0}%
+                                    </span>
+                                </div>
+
+                                <div className="p-3.5 rounded-xl bg-emerald-50/70 border border-emerald-200 flex flex-col">
+                                    <span className="text-[11px] text-emerald-800 font-semibold">
+                                        Média Pós-Revisão no Atlas 3D
+                                    </span>
+                                    <span className="text-2xl font-serif font-bold text-[#2E482C] mt-1">
+                                        {quizStats.pedagogicalEfficacy?.postReviewAvg ?? quizStats.avgAccuracy}%
+                                    </span>
+                                </div>
+                            </div>
+
+                            <p className="text-[11px] text-slate-500 leading-relaxed">
+                                {quizStats.pedagogicalEfficacy?.retestedBonesCount
+                                    ? `Evolução aferida em ${quizStats.pedagogicalEfficacy.retestedBonesCount} osso(s) reavaliado(s) após revisão no Atlas 3D (${quizStats.pedagogicalEfficacy.improvedBonesCount} com ganho positivo de nota).`
+                                    : 'Realize uma nova tentativa após revisar um osso no Atlas 3D para registrar sua curva individual de ganho pós-revisão.'}
+                            </p>
                         </div>
                     </div>
                 </div>

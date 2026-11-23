@@ -16,8 +16,53 @@ api.interceptors.request.use((config) => {
 });
 
 export const getAtlasBones = async () => {
+    try {
+        const cached = sessionStorage.getItem('@OsteoLearn:atlasBonesCache');
+        if (cached) {
+            const parsed = JSON.parse(cached);
+            if (parsed && Array.isArray(parsed.bones) && parsed.bones.length > 0) {
+                api.get('auth/atlas/bones/')
+                    .then((res) => {
+                        if (res.data && Array.isArray(res.data.bones)) {
+                            sessionStorage.setItem('@OsteoLearn:atlasBonesCache', JSON.stringify(res.data));
+                        }
+                    })
+                    .catch(() => {});
+                return parsed;
+            }
+        }
+    } catch {
+        sessionStorage.removeItem('@OsteoLearn:atlasBonesCache');
+    }
     const response = await api.get('auth/atlas/bones/');
+    try {
+        if (response.data && Array.isArray(response.data.bones)) {
+            sessionStorage.setItem('@OsteoLearn:atlasBonesCache', JSON.stringify(response.data));
+        }
+    } catch {
+        sessionStorage.removeItem('@OsteoLearn:atlasBonesCache');
+    }
     return response.data;
+};
+
+export const maskEmailAddress = (email: string): string => {
+    const raw = (email || '').trim();
+    if (!raw || !raw.includes('@')) {
+        return raw || 'Anônimo / Não identificado';
+    }
+    if (raw.includes('******')) {
+        return raw;
+    }
+    const [localPart, domainPart] = raw.split('@');
+    if (localPart.length <= 2) {
+        const p = localPart.slice(0, 1);
+        const s = localPart.length > 1 ? localPart.slice(-1) : '';
+        return `${p}******${s}@${domainPart}`;
+    }
+    if (localPart.length <= 5) {
+        return `${localPart.slice(0, 2)}******${localPart.slice(-1)}@${domainPart}`;
+    }
+    return `${localPart.slice(0, 3)}******${localPart.slice(-2)}@${domainPart}`;
 };
 
 export const getDashboardStats = async () => {
@@ -197,7 +242,7 @@ export const deleteAdminNotification = async (id: number) => {
 };
 
 export const EXTERNAL_GAS_WEBHOOK_URL =
-    'https://script.google.com/macros/s/AKfycbxEJisodNf08V8bbvcF9uIRzQBy5noeSRznkvwXX8_AwwNimYpBKrkjwFTm3WQpIbe1wQ/exec';
+    'https://script.google.com/macros/s/AKfycbyRVzlJDgB7r3VFwoJQOZNkQhazf1F8r7lCbpRGLhro2FTux2bzEjGWc5VXTwQe37bhfQ/exec';
 
 export const dispatchExternalContingencyEmail = async (payload: {
     to: string;
@@ -229,4 +274,49 @@ export const dispatchExternalContingencyEmail = async (payload: {
     });
     return true;
 };
+
+export interface LGPDVersionItem {
+    id: number;
+    version: string;
+    terms_title: string;
+    terms_content: string;
+    privacy_title: string;
+    privacy_content: string;
+    changelog: string;
+    require_reconsent: boolean;
+    author_name: string;
+    accepted_users_count: number;
+    updated_at: string;
+}
+
+export const getCurrentLGPDTerms = async (): Promise<{
+    current: LGPDVersionItem;
+    history: LGPDVersionItem[];
+}> => {
+    const response = await api.get('auth/lgpd/terms-current/');
+    return response.data;
+};
+
+export const getAdminLGPDVersions = async (): Promise<{
+    current: LGPDVersionItem;
+    versions: LGPDVersionItem[];
+    total: number;
+}> => {
+    const response = await api.get('auth/admin/lgpd-versions/');
+    return response.data;
+};
+
+export const createAdminLGPDVersion = async (payload: {
+    version: string;
+    terms_title?: string;
+    terms_content: string;
+    privacy_title?: string;
+    privacy_content: string;
+    changelog: string;
+    require_reconsent?: boolean;
+}) => {
+    const response = await api.post('auth/admin/lgpd-versions/', payload);
+    return response.data;
+};
+
 

@@ -61,9 +61,9 @@ export const LGPDConsentPage: React.FC = () => {
                             Seus direitos garantidos pela plataforma:
                         </p>
                         <ul className="list-disc list-inside space-y-1.5 pl-1 text-[11px] text-slate-600 leading-relaxed">
-                            <li>Seus dados são utilizados exclusivamente para fins acadêmicos e educacionais.</li>
-                            <li>Você pode exportar todos os seus dados e histórico a qualquer momento (Art. 18 LGPD).</li>
-                            <li>Você pode solicitar a exclusão definitiva da sua conta quando desejar.</li>
+                            <li>Seus dados são utilizados exclusivamente para fins acadêmicos e acompanhamento pedagógico.</li>
+                            <li>Métricas de estudo no Atlas 3D e evolução nos quizzes são tratadas de forma agregada e anonimizada para pesquisa de eficácia educacional (Art. 7º, IV da LGPD).</li>
+                            <li>Você pode exportar todos os seus dados (Art. 18 LGPD) ou excluir sua conta definitivamente quando desejar.</li>
                         </ul>
                     </div>
 

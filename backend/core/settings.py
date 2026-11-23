@@ -38,6 +38,7 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
+    'accounts.middleware.RequestFloodTimeoutMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -159,6 +160,10 @@ LOGIN_REDIRECT_URL = os.getenv('LOGIN_REDIRECT_URL', FRONTEND_URL or '/')
 
 MAX_AUTH_ATTEMPTS = int(os.getenv('MAX_AUTH_ATTEMPTS', '5'))
 AUTH_LOCKOUT_MINUTES = int(os.getenv('AUTH_LOCKOUT_MINUTES', '15'))
+FLOOD_MAX_REQUESTS = int(os.getenv('FLOOD_MAX_REQUESTS', '10'))
+FLOOD_WINDOW_SECONDS = int(os.getenv('FLOOD_WINDOW_SECONDS', '15'))
+FLOOD_TIMEOUT_SECONDS = int(os.getenv('FLOOD_TIMEOUT_SECONDS', '60'))
+ENABLE_FLOOD_MIDDLEWARE = not ('test' in sys.argv or 'pytest' in sys.modules or any('pytest' in arg for arg in sys.argv))
 
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (

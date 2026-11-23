@@ -74,6 +74,7 @@ class AuditLog(models.Model):
         ('DATA_EXPORT', 'Exportação de dados pessoais solicitada (Art. 18 LGPD)'),
         ('ACCOUNT_DELETED', 'Solicitação de exclusão/anonimização de conta'),
         ('NOTIFICATION_SENT', 'Notificação ou comunicado enviado'),
+        ('LGPD_TERMS_UPDATED', 'Termos de Uso e Política de Privacidade versionados'),
     ]
 
     user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='audit_logs')
