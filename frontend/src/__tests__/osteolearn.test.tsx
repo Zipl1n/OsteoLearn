@@ -270,8 +270,6 @@ describe('OsteoLearn Frontend Unit & Integration Tests', () => {
         );
 
         expect(screen.getByText(/Olá, Matheus/i)).toBeTruthy();
-        expect(screen.getByText(/Eficácia Pedagógica do Atlas 3D/i)).toBeTruthy();
-        expect(screen.getByText(/Com Estudo Prévio no Atlas 3D vs\. Sem Estudo 3D/i)).toBeTruthy();
         expect(screen.getByText(/Revisar Agora/i)).toBeTruthy();
         fireEvent.click(screen.getByText(/Revisar Agora/i));
         expect(onReviewBone).toHaveBeenCalledWith('Osso Temporal');
@@ -312,6 +310,22 @@ describe('OsteoLearn Frontend Unit & Integration Tests', () => {
                             total_landmarks: 200,
                             total_questions: 207,
                             total_events: 60,
+                            total_quiz_attempts: 12,
+                            global_avg_accuracy: 82,
+                            pedagogical_efficacy: {
+                                withAtlasAvg: 88,
+                                withoutAtlasAvg: 45,
+                                atlasAdvantagePct: 43,
+                                withAtlasAttemptsCount: 8,
+                                withoutAtlasAttemptsCount: 4,
+                                firstAttemptAvg: 45,
+                                postReviewAvg: 88,
+                                learningGainPct: 43,
+                                retestedBonesCount: 4,
+                                improvedBonesCount: 4,
+                                bonesStudiedIn3DCount: 6,
+                                totalEvaluatedAttempts: 12,
+                            },
                         },
                     },
                 };
@@ -395,6 +409,8 @@ describe('OsteoLearn Frontend Unit & Integration Tests', () => {
 
         await waitFor(() => {
             expect(screen.getAllByText(/Banco de Questões/i).length).toBeGreaterThan(0);
+            expect(screen.getByText(/Eficácia Pedagógica do Atlas 3D/i)).toBeTruthy();
+            expect(screen.getByText(/Com Estudo Prévio no Atlas 3D vs\. Sem Estudo 3D/i)).toBeTruthy();
         });
 
         fireEvent.click(screen.getByText(/Cadastro de Questões/i));
