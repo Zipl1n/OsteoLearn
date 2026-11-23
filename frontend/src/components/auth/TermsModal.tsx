@@ -78,7 +78,7 @@ export const TermsModal: React.FC<TermsModalProps> = ({ isOpen, onClose }) => {
                             <div>
                                 <h4 className="font-bold text-slate-900 mb-1">4. Mensuração de Desempenho e Eficácia Pedagógica 3D</h4>
                                 <p>
-                                    Ao explorar modelos no <strong>Atlas 3D Interativo</strong> e realizar simulados na <strong>Prova da Alfinetada (Quiz 3D)</strong>, a plataforma registra automaticamente as peças estudadas em 3D e o histórico de pontuação por tentativa para calcular indicadores individuais de evolução e métricas estatísticas agregadas de eficácia pedagógica (comparativo de aproveitamento com e sem estudo prévio no Atlas 3D e ganho de aprendizagem pós-revisão).
+                                    Ao explorar modelos no <strong>Atlas 3D Interativo</strong> e realizar simulados na <strong>Prova da Alfinetada (Quiz 3D)</strong>, a plataforma registra automaticamente as peças estudadas em 3D e o histórico de pontuação por tentativa para compor métricas estatísticas globais e anonimizadas de eficácia pedagógica no Painel Administrativo (comparativo de aproveitamento com e sem estudo prévio no Atlas 3D e ganho de aprendizagem pós-revisão).
                                 </p>
                             </div>
 

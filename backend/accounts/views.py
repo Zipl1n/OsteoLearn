@@ -1871,8 +1871,8 @@ DEFAULT_LGPD_TERMS_CONTENT = (
     "laboratório acadêmico.\n\n"
     "4. Mensuração de Desempenho e Eficácia Pedagógica 3D: Ao utilizar o Atlas 3D Interativo e realizar "
     "a Prova da Alfinetada (Quiz 3D), o sistema registra automaticamente quais peças anatômicas foram "
-    "exploradas em 3D e o histórico de pontuação por tentativa, gerando indicadores de evolução "
-    "individual para o estudante e métricas estatísticas agregadas de eficácia pedagógica."
+    "exploradas em 3D e o histórico de pontuação por tentativa para compor métricas estatísticas "
+    "agregadas e anonimizadas de eficácia pedagógica no Painel Administrativo."
 )
 
 DEFAULT_LGPD_PRIVACY_CONTENT = (
@@ -1882,8 +1882,9 @@ DEFAULT_LGPD_PRIVACY_CONTENT = (
     "2. Tratamento Estatístico Anonimizado para Pesquisa Acadêmica (Art. 7º, IV da LGPD): Os registros "
     "de estudo prévio de ossos no Atlas 3D e as taxas de acerto nos quizzes (comparativo de desempenho "
     "Com Estudo 3D vs. Sem Estudo 3D e curva de evolução entre a 1ª tentativa diagnóstica e o pós-revisão) "
-    "são processados de forma estritamente agregada e anonimizada para comprovação científica da eficácia "
-    "pedagógica da plataforma, sem identificar individualmente nenhum estudante nos relatórios globais.\n\n"
+    "são processados de forma estritamente agregada e anonimizada exclusivamente no Painel Administrativo "
+    "institucional para comprovação científica da eficácia pedagógica da plataforma, sem identificar "
+    "individualmente nenhum estudante.\n\n"
     "3. Segurança, Criptografia e Mascaramento: As senhas são armazenadas com hash criptográfico PBKDF2 "
     "SHA-256, os códigos 2FA com hash SHA-256 e os e-mails exibidos nos logs administrativos de auditoria "
     "são mascarados com asteriscos (ex: mat******sb@gmail.com) para proteção da privacidade.\n\n"

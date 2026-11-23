@@ -64,7 +64,7 @@ export const PrivacyModal: React.FC<PrivacyModalProps> = ({ isOpen, onClose }) =
                             <div>
                                 <h4 className="font-bold text-slate-900 mb-1">2. Pesquisa Acadêmica e Estatísticas Anonimizadas de Eficácia 3D (Art. 7º, IV da LGPD)</h4>
                                 <p>
-                                    Os registros de exploração prévia de peças no Atlas 3D e as taxas de acerto nos simulados (comparativo de desempenho <strong>Com Estudo no Atlas 3D vs. Sem Estudo 3D</strong> e curva de evolução entre a <strong>1ª Tentativa Diagnóstica e o Pós-Revisão</strong>) são processados de forma individualizada apenas no painel do próprio estudante e de forma <strong>estritamente agregada e anonimizada</strong> nos relatórios institucionais para comprovação científica da eficácia pedagógica da plataforma, sem identificar individualmente nenhum aluno.
+                                    Os registros de exploração prévia de peças no Atlas 3D e as taxas de acerto nos simulados (comparativo de desempenho <strong>Com Estudo no Atlas 3D vs. Sem Estudo 3D</strong> e curva de evolução entre a <strong>1ª Tentativa Diagnóstica e o Pós-Revisão</strong>) são processados de forma <strong>estritamente agregada e anonimizada</strong> exclusivamente no Painel Administrativo institucional para comprovação científica da eficácia pedagógica da plataforma, sem identificar individualmente nenhum aluno.
                                 </p>
                             </div>
 
