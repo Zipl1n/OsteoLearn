@@ -1,9 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import {
     Bone,
     Search,
     Flame,
-    Bell,
     ArrowRight,
     Target,
     TrendingUp,
@@ -11,15 +10,8 @@ import {
     AlertTriangle,
     CheckCircle2,
     BarChart3,
-    CheckCheck,
-    X,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import {
-    getUserNotifications,
-    markNotificationsRead,
-    type AppNotificationItem,
-} from '../../services/api';
 import {
     DEFAULT_ATLAS_BONES_FALLBACK,
     type AtlasBone,
@@ -74,73 +66,10 @@ export const HomePage: React.FC<HomePageProps> = ({
 }) => {
     const { user } = useAuth();
     const [searchQuery, setSearchQuery] = useState('');
-    const [isNotifOpen, setIsNotifOpen] = useState(false);
-    const [isNotifModalOpen, setIsNotifModalOpen] = useState(false);
 
     const firstName = user?.name && user.name.trim()
         ? user.name.trim().split(' ')[0]
         : user?.email.split('@')[0] || 'Estudante';
-
-    const defaultWelcomeNotification: AppNotificationItem = {
-        id: -1,
-        title: `Bem-vindo(a) ao OsteoLearn, ${firstName}!`,
-        message:
-            'É um grande prazer ter você conosco! Explore o Atlas 3D Interativo em 360°, consulte o Guia Clínico de Patologias e desafie seus conhecimentos na Prova da Alfinetada para dominar a osteologia humana.',
-        category: 'WELCOME',
-        audience: 'USER',
-        target_email: user?.email || '',
-        author_name: 'Equipe OsteoLearn',
-        sent_email: false,
-        read_count: 0,
-        is_read: localStorage.getItem(`@OsteoLearn:welcomeRead:${user?.email || ''}`) === 'true',
-        created_at: 'Agora mesmo',
-    };
-
-    const [notifications, setNotifications] = useState<AppNotificationItem[]>([
-        defaultWelcomeNotification,
-    ]);
-
-    const loadNotifications = () => {
-        if (!user?.email) return;
-        getUserNotifications()
-            .then((data) => {
-                if (Array.isArray(data.notifications) && data.notifications.length > 0) {
-                    setNotifications(data.notifications);
-                } else {
-                    setNotifications([defaultWelcomeNotification]);
-                }
-            })
-            .catch(() => {
-                setNotifications([defaultWelcomeNotification]);
-            });
-    };
-
-    useEffect(() => {
-        loadNotifications();
-    }, [user?.email]);
-
-    const unreadCount = notifications.filter((n) => !n.is_read).length;
-
-    const handleMarkSingleRead = (notif: AppNotificationItem) => {
-        if (notif.is_read) return;
-        if (notif.id === -1 && user?.email) {
-            localStorage.setItem(`@OsteoLearn:welcomeRead:${user.email}`, 'true');
-        }
-        setNotifications((prev) =>
-            prev.map((item) => (item.id === notif.id ? { ...item, is_read: true } : item))
-        );
-        if (notif.id > 0) {
-            markNotificationsRead({ notification_id: notif.id }).catch(() => {});
-        }
-    };
-
-    const handleMarkAllRead = () => {
-        if (user?.email) {
-            localStorage.setItem(`@OsteoLearn:welcomeRead:${user.email}`, 'true');
-        }
-        setNotifications((prev) => prev.map((item) => ({ ...item, is_read: true })));
-        markNotificationsRead({ mark_all: true }).catch(() => {});
-    };
 
     const scoresMap: Record<string, number> =
         quizStats.boneScores && typeof quizStats.boneScores === 'object'
@@ -277,107 +206,6 @@ export const HomePage: React.FC<HomePageProps> = ({
                             <span className="text-amber-700 text-xs font-semibold">
                                 {streakDays} {streakDays === 1 ? 'dia' : 'dias'}
                             </span>
-                        </div>
-
-                        <div className="relative">
-                            <button
-                                type="button"
-                                onClick={() => {
-                                    const nextState = !isNotifOpen;
-                                    setIsNotifOpen(nextState);
-                                    if (nextState) {
-                                        loadNotifications();
-                                    }
-                                }}
-                                title="Notificações"
-                                className="w-11 h-11 relative bg-white rounded-full border border-stone-200 flex justify-center items-center hover:bg-stone-50 transition-colors cursor-pointer flex-shrink-0"
-                            >
-                                <Bell className="w-4 h-4 text-slate-600" />
-                                {unreadCount > 0 && (
-                                    <span className="min-w-4 h-4 px-1 -right-0.5 -top-0.5 absolute bg-red-600 text-white text-[10px] font-bold rounded-full border-2 border-white flex items-center justify-center">
-                                        {unreadCount > 9 ? '9+' : unreadCount}
-                                    </span>
-                                )}
-                            </button>
-
-                            {isNotifOpen && (
-                                <div className="absolute right-0 top-13 w-88 sm:w-96 bg-white rounded-2xl border border-stone-200 shadow-2xl z-50 overflow-hidden">
-                                    <div className="px-4 py-3 bg-stone-50 border-b border-stone-200 flex items-center justify-between">
-                                        <div className="flex items-center gap-2">
-                                            <span className="text-xs font-bold text-slate-800">
-                                                Notificações
-                                            </span>
-                                            {unreadCount > 0 && (
-                                                <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-red-100 text-red-700">
-                                                    {unreadCount} {unreadCount === 1 ? 'nova' : 'novas'}
-                                                </span>
-                                            )}
-                                        </div>
-                                        <div className="flex items-center gap-2">
-                                            {unreadCount > 0 && (
-                                                <button
-                                                    type="button"
-                                                    onClick={handleMarkAllRead}
-                                                    className="text-[11px] font-semibold text-[#2E482C] hover:underline flex items-center gap-1 cursor-pointer"
-                                                >
-                                                    <CheckCheck className="w-3.5 h-3.5" />
-                                                    <span>Marcar lidas</span>
-                                                </button>
-                                            )}
-                                            <button
-                                                type="button"
-                                                onClick={() => setIsNotifOpen(false)}
-                                                className="text-slate-400 hover:text-slate-600 p-1 cursor-pointer"
-                                            >
-                                                <X className="w-3.5 h-3.5" />
-                                            </button>
-                                        </div>
-                                    </div>
-
-                                    <div className="max-h-80 overflow-y-auto divide-y divide-stone-100">
-                                        {notifications.map((notif) => (
-                                            <div
-                                                key={notif.id}
-                                                onClick={() => handleMarkSingleRead(notif)}
-                                                className={`p-4 transition-colors cursor-pointer ${
-                                                    notif.is_read
-                                                        ? 'bg-white hover:bg-stone-50/70'
-                                                        : 'bg-emerald-50/40 hover:bg-emerald-50/70'
-                                                }`}
-                                            >
-                                                <div className="flex items-start justify-between gap-2">
-                                                    <span className="text-xs font-bold text-slate-800">
-                                                        {notif.title}
-                                                    </span>
-                                                    {!notif.is_read && (
-                                                        <span className="w-2 h-2 rounded-full bg-red-600 flex-shrink-0 mt-1" />
-                                                    )}
-                                                </div>
-                                                <p className="text-xs text-slate-600 mt-1 leading-relaxed">
-                                                    {notif.message}
-                                                </p>
-                                                <div className="flex items-center justify-between mt-2 text-[10px] text-slate-400">
-                                                    <span>{notif.author_name}</span>
-                                                    <span>{notif.created_at}</span>
-                                                </div>
-                                            </div>
-                                        ))}
-                                    </div>
-
-                                    <div className="px-4 py-2.5 bg-stone-50 border-t border-stone-200 flex justify-between items-center">
-                                        <button
-                                            type="button"
-                                            onClick={() => {
-                                                setIsNotifOpen(false);
-                                                setIsNotifModalOpen(true);
-                                            }}
-                                            className="text-xs font-semibold text-[#2E482C] hover:underline cursor-pointer"
-                                        >
-                                            Ver todas as notificações em tela cheia
-                                        </button>
-                                    </div>
-                                </div>
-                            )}
                         </div>
                     </div>
                 </div>
@@ -770,90 +598,6 @@ export const HomePage: React.FC<HomePageProps> = ({
                     </div>
                 </div>
             </div>
-
-            {isNotifModalOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
-                    <div className="w-full max-w-2xl bg-white rounded-3xl border border-stone-200 shadow-2xl overflow-hidden flex flex-col max-h-[85vh]">
-                        <div className="px-6 py-4 bg-[#2E482C] text-white flex items-center justify-between">
-                            <div className="flex items-center gap-2.5">
-                                <Bell className="w-5 h-5 text-[#E7DFC6]" />
-                                <div>
-                                    <h3 className="text-base font-serif font-bold">
-                                        Central de Notificações do Estudante
-                                    </h3>
-                                    <p className="text-[11px] text-stone-200">
-                                        Comunicados oficiais, incentivos de estudo e avisos da plataforma OsteoLearn
-                                    </p>
-                                </div>
-                            </div>
-                            <button
-                                type="button"
-                                onClick={() => setIsNotifModalOpen(false)}
-                                className="p-1.5 rounded-lg hover:bg-white/10 text-white cursor-pointer"
-                            >
-                                <X className="w-4 h-4" />
-                            </button>
-                        </div>
-
-                        <div className="p-5 overflow-y-auto space-y-3 flex-1 bg-stone-50">
-                            {notifications.map((notif) => (
-                                <div
-                                    key={notif.id}
-                                    onClick={() => handleMarkSingleRead(notif)}
-                                    className={`p-4 rounded-2xl border transition-all cursor-pointer ${
-                                        notif.is_read
-                                            ? 'bg-white border-stone-200'
-                                            : 'bg-emerald-50/60 border-[#2E482C]/30 shadow-xs'
-                                    }`}
-                                >
-                                    <div className="flex items-center justify-between gap-2">
-                                        <div className="flex items-center gap-2">
-                                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#2E482C]/10 text-[#2E482C]">
-                                                {notif.category === 'WELCOME'
-                                                    ? 'BOAS-VINDAS'
-                                                    : notif.category}
-                                            </span>
-                                            <h4 className="text-sm font-bold text-slate-800">
-                                                {notif.title}
-                                            </h4>
-                                        </div>
-                                        {!notif.is_read && (
-                                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-100 text-red-700">
-                                                Nova
-                                            </span>
-                                        )}
-                                    </div>
-                                    <p className="text-xs text-slate-600 mt-2 leading-relaxed">
-                                        {notif.message}
-                                    </p>
-                                    <div className="flex items-center justify-between mt-3 pt-2 border-t border-stone-100 text-[11px] text-slate-400">
-                                        <span>Enviado por: {notif.author_name}</span>
-                                        <span>{notif.created_at}</span>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-
-                        <div className="px-6 py-3.5 bg-white border-t border-stone-200 flex items-center justify-between">
-                            <button
-                                type="button"
-                                onClick={handleMarkAllRead}
-                                className="text-xs font-semibold text-[#2E482C] hover:underline flex items-center gap-1.5 cursor-pointer"
-                            >
-                                <CheckCheck className="w-4 h-4" />
-                                <span>Marcar todas como lidas</span>
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => setIsNotifModalOpen(false)}
-                                className="px-4 py-2 rounded-xl bg-stone-200 hover:bg-stone-300 text-slate-800 text-xs font-semibold cursor-pointer"
-                            >
-                                Fechar
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
         </div>
     );
 };

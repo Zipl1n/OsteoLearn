@@ -73,7 +73,6 @@ class AuditLog(models.Model):
         ('CONSENT_ACCEPTED', 'Termo de Consentimento LGPD aceito'),
         ('DATA_EXPORT', 'Exportação de dados pessoais solicitada (Art. 18 LGPD)'),
         ('ACCOUNT_DELETED', 'Solicitação de exclusão/anonimização de conta'),
-        ('NOTIFICATION_SENT', 'Notificação ou comunicado enviado'),
         ('LGPD_TERMS_UPDATED', 'Termos de Uso e Política de Privacidade versionados'),
     ]
 

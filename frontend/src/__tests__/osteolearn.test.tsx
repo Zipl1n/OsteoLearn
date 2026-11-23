@@ -19,11 +19,6 @@ import {
     updateAdminQuestion,
     deleteAdminQuestion,
     calibrateLandmark3D,
-    getUserNotifications,
-    markNotificationsRead,
-    getAdminNotifications,
-    createAdminNotification,
-    deleteAdminNotification,
     getCurrentLGPDTerms,
     getAdminLGPDVersions,
     createAdminLGPDVersion,
@@ -121,11 +116,6 @@ describe('OsteoLearn Frontend Unit & Integration Tests', () => {
         await updateAdminQuestion(1, { is_active: false });
         await deleteAdminQuestion(1);
         await calibrateLandmark3D({ bone_name: 'Osso Temporal', order: 1, landmark_name: 'Pino', pos_x: 0, pos_y: 0, pos_z: 0 });
-        await getUserNotifications();
-        await markNotificationsRead({ mark_all: true });
-        await getAdminNotifications();
-        await createAdminNotification({ title: 'T', message: 'M', category: 'INFO', audience: 'ALL' });
-        await deleteAdminNotification(1);
         await getCurrentLGPDTerms();
         await getAdminLGPDVersions();
         await createAdminLGPDVersion({
@@ -222,29 +212,7 @@ describe('OsteoLearn Frontend Unit & Integration Tests', () => {
         expect(onSelectFocusedBone).toHaveBeenCalled();
     });
 
-    it('deve exibir Dashboard, sino de notificacoes com boas-vindas e recomendacoes de revisao (HomePage)', async () => {
-        vi.spyOn(api, 'get').mockResolvedValue({
-            data: {
-                notifications: [
-                    {
-                        id: 10,
-                        title: 'Bem-vindo(a) ao OsteoLearn, Matheus!',
-                        message: 'É um grande prazer ter você conosco!',
-                        category: 'WELCOME',
-                        audience: 'USER',
-                        target_email: 'matheushso20.sb@gmail.com',
-                        author_name: 'Equipe OsteoLearn',
-                        sent_email: false,
-                        read_count: 0,
-                        is_read: false,
-                        created_at: '20/11/2026 10:00',
-                    },
-                ],
-                unread_count: 1,
-            },
-        });
-        vi.spyOn(api, 'post').mockResolvedValue({ data: { ok: true } });
-
+    it('deve exibir Dashboard e recomendacoes de revisao (HomePage)', async () => {
         const onOpenAtlas = vi.fn();
         const onStartQuiz = vi.fn();
         const onReviewBone = vi.fn();
@@ -273,16 +241,6 @@ describe('OsteoLearn Frontend Unit & Integration Tests', () => {
         expect(screen.getByText(/Revisar Agora/i)).toBeTruthy();
         fireEvent.click(screen.getByText(/Revisar Agora/i));
         expect(onReviewBone).toHaveBeenCalledWith('Osso Temporal');
-
-        const bellBtn = screen.getByTitle('Notificações');
-        fireEvent.click(bellBtn);
-
-        await waitFor(() => {
-            expect(screen.getByText(/Bem-vindo\(a\) ao OsteoLearn, Matheus!/i)).toBeTruthy();
-        });
-
-        fireEvent.click(screen.getByText(/Ver todas as notificações em tela cheia/i));
-        expect(screen.getByText(/Central de Notificações do Estudante/i)).toBeTruthy();
     });
 
     it('deve navegar pelas 5 abas do Painel do Administrador, versionar LGPD e mascarar e-mails nos logs', async () => {
@@ -420,11 +378,6 @@ describe('OsteoLearn Frontend Unit & Integration Tests', () => {
         fireEvent.click(screen.getByText(/Cadastro de Questões/i));
         await waitFor(() => {
             expect(screen.getByText(/Questões Cadastradas/i)).toBeTruthy();
-        });
-
-        fireEvent.click(screen.getByText(/Notificações e Avisos/i));
-        await waitFor(() => {
-            expect(screen.getByText(/Publicar Notificação \/ Comunicado no Sistema/i)).toBeTruthy();
         });
 
         fireEvent.click(screen.getByText(/Termos e Privacidade \(LGPD\)/i));

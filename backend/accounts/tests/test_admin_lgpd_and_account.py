@@ -263,12 +263,10 @@ class AdminLGPDAndAccountFullTest(APITestCase):
             if p.exists():
                 os.remove(p)
 
-    def test_deve_gerenciar_questoes_e_notificacoes_no_painel_administrativo(self):
+    def test_deve_gerenciar_questoes_no_painel_administrativo(self):
         self.client.force_authenticate(user=self.student)
         self.assertEqual(self.client.get('/api/auth/admin/questions/').status_code, status.HTTP_403_FORBIDDEN)
         self.assertEqual(self.client.post('/api/auth/admin/questions/', {}).status_code, status.HTTP_403_FORBIDDEN)
-        self.assertEqual(self.client.get('/api/auth/admin/notifications/').status_code, status.HTTP_403_FORBIDDEN)
-        self.assertEqual(self.client.post('/api/auth/admin/notifications/', {}).status_code, status.HTTP_403_FORBIDDEN)
 
         self.client.force_authenticate(user=self.admin)
         self.assertEqual(self.client.post('/api/auth/admin/questions/', {'bone_id': 99999}, format='json').status_code, status.HTTP_400_BAD_REQUEST)
@@ -329,48 +327,6 @@ class AdminLGPDAndAccountFullTest(APITestCase):
         self.assertEqual(self.client.patch('/api/auth/admin/questions/99999/', {}).status_code, status.HTTP_404_NOT_FOUND)
         self.assertEqual(self.client.delete('/api/auth/admin/questions/99999/').status_code, status.HTTP_404_NOT_FOUND)
         self.assertEqual(self.client.delete(f'/api/auth/admin/questions/{q_id}/').status_code, status.HTTP_200_OK)
-
-        self.assertEqual(
-            self.client.post('/api/auth/admin/notifications/', {'title': '', 'message': ''}, format='json').status_code,
-            status.HTTP_400_BAD_REQUEST,
-        )
-        self.assertEqual(
-            self.client.post('/api/auth/admin/notifications/', {'title': 'T', 'message': 'M', 'audience': 'USER', 'target_email': ''}, format='json').status_code,
-            status.HTTP_400_BAD_REQUEST,
-        )
-
-        with patch('accounts.views.send_notification_email', return_value=True):
-            resp_n_create = self.client.post(
-                '/api/auth/admin/notifications/',
-                {
-                    'title': 'Simulado de Fêmur Liberado',
-                    'message': 'Participe do novo simulado no Quiz 3D!',
-                    'category': 'ESTUDO',
-                    'audience': 'ALL',
-                    'send_email': True,
-                },
-                format='json',
-            )
-            self.assertEqual(resp_n_create.status_code, status.HTTP_201_CREATED)
-            n_id = resp_n_create.data['notification']['id']
-
-        resp_n_admin = self.client.get('/api/auth/admin/notifications/')
-        self.assertEqual(resp_n_admin.status_code, status.HTTP_200_OK)
-
-        self.client.force_authenticate(user=self.student)
-        resp_user_notifs = self.client.get('/api/auth/notifications/')
-        self.assertEqual(resp_user_notifs.status_code, status.HTTP_200_OK)
-        self.assertGreaterEqual(resp_user_notifs.data['unread_count'], 2)
-
-        resp_read_one = self.client.post('/api/auth/notifications/read/', {'notification_id': n_id}, format='json')
-        self.assertEqual(resp_read_one.status_code, status.HTTP_200_OK)
-
-        resp_read_all = self.client.post('/api/auth/notifications/read/', {'mark_all': True}, format='json')
-        self.assertEqual(resp_read_all.status_code, status.HTTP_200_OK)
-
-        self.client.force_authenticate(user=self.admin)
-        self.assertEqual(self.client.delete('/api/auth/admin/notifications/99999/').status_code, status.HTTP_404_NOT_FOUND)
-        self.assertEqual(self.client.delete(f'/api/auth/admin/notifications/{n_id}/').status_code, status.HTTP_200_OK)
 
     @patch('accounts.views.send_mail')
     def test_deve_executar_fluxo_completo_de_recuperacao_de_senha_reenvio_2fa_e_bloqueios(self, mock_send_mail):
