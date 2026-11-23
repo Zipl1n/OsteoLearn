@@ -110,7 +110,7 @@ export const AdminLogsModal: React.FC<AdminLogsModalProps> = ({
     onClose,
     onCatalogUpdated,
 }) => {
-    const [activeTab, setActiveTab] = useState<'models' | 'questions' | 'notifications' | 'lgpd' | 'logs'>('models');
+    const [activeTab, setActiveTab] = useState<'models' | 'questions' | 'notifications' | 'lgpd' | 'efficacy' | 'logs'>('models');
     const [logs, setLogs] = useState<LogItem[]>([]);
     const [adminNotifications, setAdminNotifications] = useState<AppNotificationItem[]>([]);
     const [lgpdVersions, setLgpdVersions] = useState<LGPDVersionItem[]>([]);
@@ -138,6 +138,22 @@ export const AdminLogsModal: React.FC<AdminLogsModalProps> = ({
         total_landmarks: 200,
         total_questions: 207,
         total_events: 0,
+        total_quiz_attempts: 0,
+        global_avg_accuracy: 0,
+        pedagogical_efficacy: {
+            withAtlasAvg: 0,
+            withoutAtlasAvg: 0,
+            atlasAdvantagePct: 0,
+            withAtlasAttemptsCount: 0,
+            withoutAtlasAttemptsCount: 0,
+            firstAttemptAvg: 0,
+            postReviewAvg: 0,
+            learningGainPct: 0,
+            retestedBonesCount: 0,
+            improvedBonesCount: 0,
+            bonesStudiedIn3DCount: 0,
+            totalEvaluatedAttempts: 0,
+        },
     });
     const [bones, setBones] = useState<AdminBoneItem[]>([]);
     const [questions, setQuestions] = useState<AdminQuestionItem[]>([]);
@@ -635,132 +651,58 @@ export const AdminLogsModal: React.FC<AdminLogsModalProps> = ({
                     </div>
                 </div>
 
-                {summary.pedagogical_efficacy && (
-                    <div className="px-6 py-3 bg-emerald-950/25 border-b border-slate-800 flex flex-col gap-3">
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                            <div className="flex items-center gap-2.5">
+                {(() => {
+                    const eff = summary.pedagogical_efficacy || {
+                        withAtlasAvg: 0,
+                        withoutAtlasAvg: 0,
+                        atlasAdvantagePct: 0,
+                        withAtlasAttemptsCount: 0,
+                        withoutAtlasAttemptsCount: 0,
+                        firstAttemptAvg: 0,
+                        postReviewAvg: 0,
+                        learningGainPct: 0,
+                        retestedBonesCount: 0,
+                        improvedBonesCount: 0,
+                        bonesStudiedIn3DCount: 0,
+                        totalEvaluatedAttempts: 0,
+                    };
+                    return (
+                        <div className="px-6 py-2.5 bg-emerald-950/25 border-b border-slate-800 flex flex-wrap items-center justify-between gap-3">
+                            <div className="flex flex-wrap items-center gap-2.5">
                                 <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
                                     Eficácia Pedagógica do Atlas 3D (Art. 7º, IV LGPD - Anonimizado)
                                 </span>
                                 <span className="text-xs text-slate-300">
-                                    Desempenho Geral do Site:{' '}
+                                    Testes Realizados:{' '}
                                     <strong className="text-white">
-                                        {summary.total_quiz_attempts ?? summary.pedagogical_efficacy.totalEvaluatedAttempts} testes realizados
+                                        {summary.total_quiz_attempts ?? eff.totalEvaluatedAttempts}
                                     </strong>{' '}
-                                    · Média Global de Acertos:{' '}
+                                    · Média Global:{' '}
                                     <strong className="text-emerald-300">
                                         {summary.global_avg_accuracy ?? 0}%
                                     </strong>{' '}
-                                    · Estruturas Exploradas no Atlas 3D:{' '}
-                                    <strong className="text-cyan-300">
-                                        {summary.pedagogical_efficacy.bonesStudiedIn3DCount}
+                                    · Com Atlas 3D:{' '}
+                                    <strong className="text-emerald-300">{eff.withAtlasAvg}%</strong> vs. Sem Estudo 3D:{' '}
+                                    <strong className="text-amber-300">{eff.withoutAtlasAvg}%</strong> (Impacto:{' '}
+                                    <strong className="text-emerald-400">
+                                        {eff.atlasAdvantagePct >= 0 ? `+${eff.atlasAdvantagePct}%` : `${eff.atlasAdvantagePct}%`}
                                     </strong>
+                                    )
                                 </span>
                             </div>
+                            <button
+                                type="button"
+                                onClick={() => setActiveTab('efficacy')}
+                                className="px-3 py-1 rounded-lg text-[11px] font-bold bg-emerald-600/30 hover:bg-emerald-600/50 text-emerald-200 border border-emerald-500/40 transition-colors cursor-pointer"
+                            >
+                                Ver Painel Completo de Eficácia 3D
+                            </button>
                         </div>
-
-                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                            <div className="p-3.5 rounded-xl bg-slate-950/80 border border-slate-800 flex flex-col gap-2">
-                                <div className="flex items-center justify-between gap-2">
-                                    <div>
-                                        <span className="text-[10px] uppercase tracking-wider font-bold text-emerald-400">
-                                            Comparativo por Método de Estudo (Geral do Site)
-                                        </span>
-                                        <h4 className="text-xs font-bold text-white mt-0.5">
-                                            Com Estudo Prévio no Atlas 3D vs. Sem Estudo 3D
-                                        </h4>
-                                    </div>
-                                    <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 whitespace-nowrap">
-                                        {summary.pedagogical_efficacy.atlasAdvantagePct >= 0
-                                            ? `+${summary.pedagogical_efficacy.atlasAdvantagePct}% com Atlas 3D`
-                                            : `${summary.pedagogical_efficacy.atlasAdvantagePct}%`}
-                                    </span>
-                                </div>
-
-                                <div className="space-y-2">
-                                    <div className="space-y-1">
-                                        <div className="flex justify-between text-[11px] font-semibold">
-                                            <span className="text-emerald-300">
-                                                Com Estudo Prévio no Atlas 3D ({summary.pedagogical_efficacy.withAtlasAttemptsCount} aval.)
-                                            </span>
-                                            <span className="text-white">
-                                                {summary.pedagogical_efficacy.withAtlasAvg}%
-                                            </span>
-                                        </div>
-                                        <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
-                                            <div
-                                                className="h-full bg-emerald-500 rounded-full transition-all duration-500"
-                                                style={{ width: `${summary.pedagogical_efficacy.withAtlasAvg}%` }}
-                                            />
-                                        </div>
-                                    </div>
-
-                                    <div className="space-y-1">
-                                        <div className="flex justify-between text-[11px] font-medium">
-                                            <span className="text-slate-400">
-                                                Sem Estudo Prévio / Tentativa Inicial ({summary.pedagogical_efficacy.withoutAtlasAttemptsCount} aval.)
-                                            </span>
-                                            <span className="text-amber-300">
-                                                {summary.pedagogical_efficacy.withoutAtlasAvg}%
-                                            </span>
-                                        </div>
-                                        <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
-                                            <div
-                                                className="h-full bg-amber-500 rounded-full transition-all duration-500"
-                                                style={{ width: `${summary.pedagogical_efficacy.withoutAtlasAvg}%` }}
-                                            />
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div className="p-3.5 rounded-xl bg-slate-950/80 border border-slate-800 flex flex-col justify-between gap-2">
-                                <div className="flex items-center justify-between gap-2">
-                                    <div>
-                                        <span className="text-[10px] uppercase tracking-wider font-bold text-amber-400">
-                                            Curva de Evolução Longitudinal (Geral do Site)
-                                        </span>
-                                        <h4 className="text-xs font-bold text-white mt-0.5">
-                                            1ª Tentativa (Diagnóstica) vs. Pós-Revisão 3D
-                                        </h4>
-                                    </div>
-                                    <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 whitespace-nowrap">
-                                        {summary.pedagogical_efficacy.learningGainPct >= 0
-                                            ? `+${summary.pedagogical_efficacy.learningGainPct}% de evolução`
-                                            : `${summary.pedagogical_efficacy.learningGainPct}%`}
-                                    </span>
-                                </div>
-
-                                <div className="grid grid-cols-2 gap-2.5">
-                                    <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800 flex flex-col">
-                                        <span className="text-[11px] text-slate-400">
-                                            Média 1ª Tentativa (Inicial)
-                                        </span>
-                                        <span className="text-lg font-bold text-slate-200">
-                                            {summary.pedagogical_efficacy.firstAttemptAvg}%
-                                        </span>
-                                    </div>
-
-                                    <div className="p-2.5 rounded-lg bg-emerald-950/40 border border-emerald-700/40 flex flex-col">
-                                        <span className="text-[11px] text-emerald-300 font-semibold">
-                                            Média Pós-Revisão no Atlas 3D
-                                        </span>
-                                        <span className="text-lg font-bold text-emerald-300">
-                                            {summary.pedagogical_efficacy.postReviewAvg}%
-                                        </span>
-                                    </div>
-                                </div>
-
-                                <span className="text-[11px] text-slate-400">
-                                    {summary.pedagogical_efficacy.retestedBonesCount} reavaliações realizadas no site ({summary.pedagogical_efficacy.improvedBonesCount} com ganho positivo de nota pós-revisão 3D).
-                                </span>
-                            </div>
-                        </div>
-                    </div>
-                )}
+                    );
+                })()}
 
                 <div className="flex items-center justify-between px-6 py-3 bg-slate-950/40 border-b border-slate-800">
-                    <div className="flex gap-2">
+                    <div className="flex flex-wrap gap-2">
                         <button
                             type="button"
                             onClick={() => setActiveTab('models')}
@@ -800,6 +742,16 @@ export const AdminLogsModal: React.FC<AdminLogsModalProps> = ({
                                 }`}
                         >
                             Termos e Privacidade (LGPD)
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setActiveTab('efficacy')}
+                            className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors cursor-pointer ${activeTab === 'efficacy'
+                                ? 'bg-emerald-600 text-white'
+                                : 'bg-slate-800 text-emerald-300 hover:bg-slate-700'
+                                }`}
+                        >
+                            Eficácia Pedagógica 3D
                         </button>
                         <button
                             type="button"
@@ -1806,6 +1758,169 @@ export const AdminLogsModal: React.FC<AdminLogsModalProps> = ({
                             </div>
                         </div>
                     )}
+
+                    {activeTab === 'efficacy' && (() => {
+                        const eff = summary.pedagogical_efficacy || {
+                            withAtlasAvg: 0,
+                            withoutAtlasAvg: 0,
+                            atlasAdvantagePct: 0,
+                            withAtlasAttemptsCount: 0,
+                            withoutAtlasAttemptsCount: 0,
+                            firstAttemptAvg: 0,
+                            postReviewAvg: 0,
+                            learningGainPct: 0,
+                            retestedBonesCount: 0,
+                            improvedBonesCount: 0,
+                            bonesStudiedIn3DCount: 0,
+                            totalEvaluatedAttempts: 0,
+                        };
+                        return (
+                            <div className="space-y-6">
+                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-950/70 border border-slate-800 rounded-xl p-5">
+                                    <div>
+                                        <div className="flex items-center gap-2.5">
+                                            <h3 className="text-lg font-bold text-white">
+                                                Eficácia Pedagógica do Atlas 3D - Desempenho Geral do Site
+                                            </h3>
+                                            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                                                Art. 7º, IV LGPD - Estatística Anonimizada
+                                            </span>
+                                        </div>
+                                        <p className="text-xs text-slate-400 mt-1">
+                                            Indicadores consolidados de todas as avaliações realizadas na plataforma, comparando o aproveitamento com estudo prévio na malha 3D e a evolução longitudinal pós-revisão.
+                                        </p>
+                                    </div>
+
+                                    <div className="flex flex-wrap items-center gap-2.5">
+                                        <div className="px-3.5 py-2 rounded-xl bg-slate-900 border border-slate-800 flex flex-col">
+                                            <span className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">
+                                                Total de Testes no Site
+                                            </span>
+                                            <span className="text-base font-bold text-white">
+                                                {summary.total_quiz_attempts ?? eff.totalEvaluatedAttempts} avaliações
+                                            </span>
+                                        </div>
+                                        <div className="px-3.5 py-2 rounded-xl bg-slate-900 border border-slate-800 flex flex-col">
+                                            <span className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">
+                                                Média Global de Acertos
+                                            </span>
+                                            <span className="text-base font-bold text-emerald-300">
+                                                {summary.global_avg_accuracy ?? 0}%
+                                            </span>
+                                        </div>
+                                        <div className="px-3.5 py-2 rounded-xl bg-emerald-950/40 border border-emerald-700/40 flex flex-col">
+                                            <span className="text-[10px] uppercase tracking-wider text-emerald-300 font-semibold">
+                                                Peças Exploradas em 3D
+                                            </span>
+                                            <span className="text-base font-bold text-emerald-200">
+                                                {eff.bonesStudiedIn3DCount} estruturas
+                                            </span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                                    <div className="bg-slate-950/80 rounded-2xl border border-slate-800 p-6 flex flex-col justify-between gap-5">
+                                        <div className="flex items-start justify-between gap-3">
+                                            <div>
+                                                <span className="text-[10px] uppercase tracking-wider font-bold text-emerald-400">
+                                                    Comparativo por Método de Estudo
+                                                </span>
+                                                <h4 className="text-base font-bold text-white mt-0.5">
+                                                    Com Estudo Prévio no Atlas 3D vs. Sem Estudo 3D
+                                                </h4>
+                                            </div>
+                                            <span className="px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 whitespace-nowrap">
+                                                {eff.atlasAdvantagePct >= 0
+                                                    ? `+${eff.atlasAdvantagePct}% com Atlas 3D`
+                                                    : `${eff.atlasAdvantagePct}%`}
+                                            </span>
+                                        </div>
+
+                                        <div className="space-y-4">
+                                            <div className="space-y-1.5">
+                                                <div className="flex justify-between text-xs font-semibold">
+                                                    <span className="text-emerald-300">
+                                                        Com Estudo Prévio no Atlas 3D ({eff.withAtlasAttemptsCount} aval.)
+                                                    </span>
+                                                    <span className="text-white">{eff.withAtlasAvg}%</span>
+                                                </div>
+                                                <div className="w-full h-3.5 bg-slate-800 rounded-full overflow-hidden">
+                                                    <div
+                                                        className="h-full bg-emerald-500 rounded-full transition-all duration-500"
+                                                        style={{ width: `${eff.withAtlasAvg}%` }}
+                                                    />
+                                                </div>
+                                            </div>
+
+                                            <div className="space-y-1.5">
+                                                <div className="flex justify-between text-xs font-medium">
+                                                    <span className="text-slate-400">
+                                                        Sem Estudo Prévio / Tentativa Inicial ({eff.withoutAtlasAttemptsCount} aval.)
+                                                    </span>
+                                                    <span className="text-amber-300">{eff.withoutAtlasAvg}%</span>
+                                                </div>
+                                                <div className="w-full h-3.5 bg-slate-800 rounded-full overflow-hidden">
+                                                    <div
+                                                        className="h-full bg-amber-500 rounded-full transition-all duration-500"
+                                                        style={{ width: `${eff.withoutAtlasAvg}%` }}
+                                                    />
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <p className="text-xs text-slate-400 leading-relaxed">
+                                            Mede a diferença global de precisão na Prova da Alfinetada entre ossos inspecionados previamente no Visualizador 3D e tentativas realizadas sem revisão tridimensional prévia.
+                                        </p>
+                                    </div>
+
+                                    <div className="bg-slate-950/80 rounded-2xl border border-slate-800 p-6 flex flex-col justify-between gap-5">
+                                        <div className="flex items-start justify-between gap-3">
+                                            <div>
+                                                <span className="text-[10px] uppercase tracking-wider font-bold text-amber-400">
+                                                    Curva de Evolução Longitudinal
+                                                </span>
+                                                <h4 className="text-base font-bold text-white mt-0.5">
+                                                    1ª Tentativa (Diagnóstica) vs. Pós-Revisão 3D
+                                                </h4>
+                                            </div>
+                                            <span className="px-3 py-1 rounded-full text-xs font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 whitespace-nowrap">
+                                                {eff.learningGainPct >= 0
+                                                    ? `+${eff.learningGainPct}% de evolução`
+                                                    : `${eff.learningGainPct}%`}
+                                            </span>
+                                        </div>
+
+                                        <div className="grid grid-cols-2 gap-4">
+                                            <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 flex flex-col">
+                                                <span className="text-xs text-slate-400 font-medium">
+                                                    Média 1ª Tentativa (Inicial)
+                                                </span>
+                                                <span className="text-2xl font-bold text-slate-200 mt-1">
+                                                    {eff.firstAttemptAvg}%
+                                                </span>
+                                            </div>
+
+                                            <div className="p-4 rounded-xl bg-emerald-950/40 border border-emerald-700/40 flex flex-col">
+                                                <span className="text-xs text-emerald-300 font-semibold">
+                                                    Média Pós-Revisão no Atlas 3D
+                                                </span>
+                                                <span className="text-2xl font-bold text-emerald-300 mt-1">
+                                                    {eff.postReviewAvg}%
+                                                </span>
+                                            </div>
+                                        </div>
+
+                                        <p className="text-xs text-slate-400 leading-relaxed">
+                                            {eff.retestedBonesCount > 0
+                                                ? `Evolução aferida em ${eff.retestedBonesCount} reavaliação(ões) longitudinal(is) após revisão no Atlas 3D (${eff.improvedBonesCount} com ganho positivo de nota).`
+                                                : 'Os indicadores longitudinais são atualizados automaticamente à medida que os estudantes realizam novas tentativas após revisar os ossos no Atlas 3D.'}
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                        );
+                    })()}
 
                     {activeTab === 'logs' && (
                         <div className="space-y-4">

@@ -409,7 +409,11 @@ describe('OsteoLearn Frontend Unit & Integration Tests', () => {
 
         await waitFor(() => {
             expect(screen.getAllByText(/Banco de Questões/i).length).toBeGreaterThan(0);
-            expect(screen.getByText(/Eficácia Pedagógica do Atlas 3D/i)).toBeTruthy();
+            expect(screen.getAllByText(/Eficácia Pedagógica do Atlas 3D/i).length).toBeGreaterThan(0);
+        });
+
+        fireEvent.click(screen.getByRole('button', { name: /Eficácia Pedagógica 3D/i }));
+        await waitFor(() => {
             expect(screen.getByText(/Com Estudo Prévio no Atlas 3D vs\. Sem Estudo 3D/i)).toBeTruthy();
         });
 
