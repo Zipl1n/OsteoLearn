@@ -329,6 +329,9 @@ export const QuizPage: React.FC<QuizPageProps> = ({
                 });
             }
         }
+        if (nextLives <= 0 && onQuizFinished) {
+            onQuizFinished(correctCount, activeQuestions.length, quizTitle, quizBone?.id);
+        }
     };
 
     const handleConfirmAnswer = async () => {
@@ -350,14 +353,20 @@ export const QuizPage: React.FC<QuizPageProps> = ({
                 explanation: result.explanation || '',
                 clinicalCorrelation: result.clinical_correlation || '',
             });
+            const nextCorrect = isCorrect ? correctCount + 1 : correctCount;
+            const nextLives = isCorrect ? lives : lives - 1;
             if (isCorrect) {
-                setCorrectCount((prev) => prev + 1);
+                setCorrectCount(nextCorrect);
                 setStreak((prev) => prev + 1);
             } else {
-                setLives((prev) => prev - 1);
+                setLives(nextLives);
                 setStreak(0);
             }
             setIsConfirmed(true);
+            const isLastQuestion = currentIndex + 1 >= activeQuestions.length;
+            if ((nextLives <= 0 || isLastQuestion) && onQuizFinished) {
+                onQuizFinished(nextCorrect, activeQuestions.length, quizTitle, quizBone?.id);
+            }
         } finally {
             setVerifyingAnswer(false);
         }
@@ -368,13 +377,11 @@ export const QuizPage: React.FC<QuizPageProps> = ({
     const handleNextQuestion = () => {
         if (lives <= 0) {
             setQuizStatus('failed');
-            if (onQuizFinished) onQuizFinished(correctCount, activeQuestions.length, quizTitle, quizBone?.id);
             return;
         }
 
         if (currentIndex + 1 >= activeQuestions.length) {
             setQuizStatus('completed');
-            if (onQuizFinished) onQuizFinished(correctCount, activeQuestions.length, quizTitle, quizBone?.id);
             return;
         }
 

@@ -266,7 +266,11 @@ def compute_pedagogical_efficacy_metrics(user=None):
 
     studied_map = {}
     for rec in records:
-        studied_map[(rec.user_id, rec.bone_id)] = bool(rec.studied_in_atlas)
+        key = (rec.user_id, rec.bone_id)
+        has_atlas_study = bool(rec.studied_in_atlas) and (
+            rec.attempts_count == 0 or rec.updated_at >= rec.created_at
+        )
+        studied_map[key] = has_atlas_study
 
     grouped_attempts = {}
     for att in attempts:
@@ -285,24 +289,26 @@ def compute_pedagogical_efficacy_metrics(user=None):
         if len(acc_list) >= 2:
             retested_bones_count += 1
             first_acc = acc_list[0]
-            best_after = max(acc_list[1:])
+            subsequent_scores = acc_list[1:]
+            best_after = max(subsequent_scores)
             first_attempt_scores.append(first_acc)
-            post_review_scores.append(best_after)
+            post_review_scores.extend(subsequent_scores)
             without_atlas_scores.append(first_acc)
-            with_atlas_scores.append(best_after)
+            with_atlas_scores.extend(subsequent_scores)
             if best_after > first_acc:
                 improved_bones_count += 1
         elif len(acc_list) == 1:
             only_acc = acc_list[0]
             if studied_3d:
                 with_atlas_scores.append(only_acc)
+                post_review_scores.append(only_acc)
             else:
                 without_atlas_scores.append(only_acc)
                 first_attempt_scores.append(only_acc)
 
     with_atlas_avg = round(sum(with_atlas_scores) / len(with_atlas_scores)) if with_atlas_scores else 0
     without_atlas_avg = round(sum(without_atlas_scores) / len(without_atlas_scores)) if without_atlas_scores else 0
-    first_attempt_avg = round(sum(first_attempt_scores) / len(first_attempt_scores)) if first_attempt_scores else 0
+    first_attempt_avg = round(sum(first_attempt_scores) / len(first_attempt_scores)) if first_attempt_scores else without_atlas_avg
     post_review_avg = round(sum(post_review_scores) / len(post_review_scores)) if post_review_scores else with_atlas_avg
 
     atlas_advantage_pct = (
@@ -875,10 +881,10 @@ class RecordBoneStudyView(APIView):
         progress = request.data.get('progress')
 
         bone = None
-        if bone_id:
-            bone = Bone.objects.filter(id=bone_id).first()
-        if not bone and bone_name:
+        if bone_name:
             bone = Bone.objects.filter(name__iexact=bone_name).first()
+        if not bone and bone_id:
+            bone = Bone.objects.filter(id=bone_id).first()
 
         if bone:
             record, _ = BoneStudyRecord.objects.get_or_create(user=request.user, bone=bone)
@@ -908,10 +914,10 @@ class QuizQuestionsView(APIView):
         bone_name = request.query_params.get('bone_name')
 
         bone = None
-        if bone_id:
-            bone = Bone.objects.filter(id=bone_id, is_active=True).first()
-        if not bone and bone_name:
+        if bone_name:
             bone = Bone.objects.filter(name__iexact=bone_name, is_active=True).first()
+        if not bone and bone_id:
+            bone = Bone.objects.filter(id=bone_id, is_active=True).first()
         if not bone:
             bone = Bone.objects.filter(name='Osso Temporal', is_active=True).first() or Bone.objects.filter(is_active=True).first()
 
@@ -1028,10 +1034,10 @@ class QuizFinishAttemptView(APIView):
             return Response({'error': 'Dados de pontuação inválidos.'}, status=status.HTTP_400_BAD_REQUEST)
 
         bone = None
-        if bone_id:
-            bone = Bone.objects.filter(id=bone_id).first()
-        if not bone and bone_name:
+        if bone_name:
             bone = Bone.objects.filter(name__iexact=bone_name).first()
+        if not bone and bone_id:
+            bone = Bone.objects.filter(id=bone_id).first()
         if not bone:
             bone = Bone.objects.filter(name='Osso Temporal').first() or Bone.objects.first()
 

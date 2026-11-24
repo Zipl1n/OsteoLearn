@@ -7,6 +7,14 @@ _FLOOD_LOCK = threading.Lock()
 _CLIENT_REQUESTS = {}
 _CLIENT_BLOCKED_UNTIL = {}
 
+EXEMPT_FLOOD_PREFIXES = (
+    '/api/auth/quiz/',
+    '/api/auth/dashboard/',
+    '/api/auth/atlas/',
+    '/api/auth/admin/',
+    '/api/auth/me/',
+)
+
 
 def reset_flood_tracker():
     with _FLOOD_LOCK:
@@ -30,7 +38,7 @@ class RequestFloodTimeoutMiddleware:
             return self.get_response(request)
 
         path = request.path or ''
-        if not path.startswith('/api/'):
+        if not path.startswith('/api/') or any(path.startswith(prefix) for prefix in EXEMPT_FLOOD_PREFIXES):
             return self.get_response(request)
 
         max_requests = int(getattr(settings, 'FLOOD_MAX_REQUESTS', 10))
