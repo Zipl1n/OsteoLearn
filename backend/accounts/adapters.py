@@ -12,9 +12,7 @@ from .serializers import UserSerializer
 
 
 def build_jwt_redirect_url(user, request):
-    from .views import ensure_welcome_notification
     refresh = RefreshToken.for_user(user)
-    ensure_welcome_notification(user)
 
     x_forwarded = request.META.get('HTTP_X_FORWARDED_FOR')
     ip = x_forwarded.split(',')[0].strip() if x_forwarded else request.META.get('REMOTE_ADDR')

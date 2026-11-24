@@ -218,6 +218,26 @@ function AnatomicalBoneViewer({
 
 export default function App() {
   const { user, loading, logout, exportMyData, deleteMyAccount } = useAuth();
+  const tabSessionIdRef = useRef<string>(
+    `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+  );
+  const [isTabSuperseded, setIsTabSuperseded] = useState(false);
+
+  const claimActiveTabSession = (routeName: string) => {
+    setIsTabSuperseded(false);
+    try {
+      localStorage.setItem(
+        '@OsteoLearn:activeTabClaim',
+        JSON.stringify({
+          tabId: tabSessionIdRef.current,
+          email: user?.email || '',
+          route: routeName,
+          ts: Date.now(),
+        })
+      );
+    } catch {
+    }
+  };
 
   const [currentPage, setCurrentPageState] = useState<
     'dashboard' | 'atlas-catalog' | 'atlas-viewer' | 'pathology-guide' | 'quiz' | 'delete-account'
@@ -233,6 +253,7 @@ export default function App() {
       | 'delete-account',
     pushToHistory = true
   ) => {
+    claimActiveTabSession(nextPage);
     setCurrentPageState((prev) => {
       if (pushToHistory && prev !== nextPage) {
         window.history.pushState({ osteoPage: nextPage }, '', window.location.pathname);
@@ -387,14 +408,37 @@ export default function App() {
   useEffect(() => {
     if (!user) {
       setQuizStats(emptyStats);
+      setIsTabSuperseded(false);
       return;
     }
+    claimActiveTabSession('dashboard');
     setCurrentPageState('dashboard');
     window.history.replaceState({ osteoPage: 'dashboard' }, '', window.location.pathname);
     window.history.pushState({ osteoPage: 'dashboard' }, '', window.location.pathname);
     getDashboardStats()
       .then((data) => applyServerStats(data))
       .catch(() => { });
+  }, [user?.email]);
+
+  useEffect(() => {
+    if (!user?.email) return;
+    const handleStorageChange = (event: StorageEvent) => {
+      if (event.key !== '@OsteoLearn:activeTabClaim' || !event.newValue) return;
+      try {
+        const parsed = JSON.parse(event.newValue);
+        if (
+          parsed &&
+          parsed.tabId &&
+          parsed.tabId !== tabSessionIdRef.current &&
+          (!parsed.email || parsed.email === user.email)
+        ) {
+          setIsTabSuperseded(true);
+        }
+      } catch {
+      }
+    };
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
   }, [user?.email]);
 
   useEffect(() => {
@@ -543,6 +587,45 @@ export default function App() {
 
   if (!user.lgpd_consent) {
     return <LGPDConsentPage />;
+  }
+
+  if (isTabSuperseded) {
+    return (
+      <div className="flex flex-col items-center justify-center h-screen w-screen bg-gradient-to-br from-[#1E331C] via-[#2E482C] to-[#121E11] text-white p-6 font-sans select-none">
+        <div className="w-full max-w-md bg-white text-slate-800 rounded-3xl shadow-2xl border border-stone-200 p-8 text-center space-y-5">
+          <div className="w-14 h-14 rounded-2xl bg-amber-50 border border-amber-200 text-amber-700 flex items-center justify-center mx-auto">
+            <AlertTriangle className="w-7 h-7" />
+          </div>
+          <div className="space-y-2">
+            <h2 className="font-serif font-bold text-2xl text-slate-900">
+              Sessão Transferida para Outra Aba
+            </h2>
+            <p className="text-xs text-slate-600 leading-relaxed">
+              Detectamos que sua conta iniciou uma nova navegação em outra guia do navegador. Para garantir a integridade das avaliações na Prova da Alfinetada e evitar consulta simultânea ao Atlas 3D, apenas uma aba pode permanecer ativa por vez.
+            </p>
+          </div>
+          <div className="flex flex-col gap-2.5 pt-2">
+            <button
+              type="button"
+              onClick={() => {
+                claimActiveTabSession('dashboard');
+                setCurrentPageState('dashboard');
+              }}
+              className="w-full h-11 bg-[#2E482C] hover:bg-[#233821] text-white rounded-full text-xs font-bold transition-colors cursor-pointer"
+            >
+              Retomar Estudo Nesta Aba (Encerrar a Outra)
+            </button>
+            <button
+              type="button"
+              onClick={logout}
+              className="w-full h-11 bg-stone-100 hover:bg-stone-200 text-slate-700 rounded-full text-xs font-semibold transition-colors cursor-pointer"
+            >
+              Encerrar Sessão da Conta
+            </button>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (
