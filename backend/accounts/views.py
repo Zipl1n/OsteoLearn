@@ -267,10 +267,7 @@ def compute_pedagogical_efficacy_metrics(user=None):
     studied_map = {}
     for rec in records:
         key = (rec.user_id, rec.bone_id)
-        has_atlas_study = bool(rec.studied_in_atlas) and (
-            rec.attempts_count == 0 or rec.updated_at >= rec.created_at
-        )
-        studied_map[key] = has_atlas_study
+        studied_map[key] = bool(rec.studied_in_atlas)
 
     grouped_attempts = {}
     for att in attempts:
